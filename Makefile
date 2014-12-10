@@ -2,7 +2,7 @@
 #
 # The top level targets link in the two .o files for now.
 #
-TARGETS += opc-server
+TARGETS += opc-server memstress
 
 LEDSCAPE_OBJS = ledscape.o pru.o util.o lib/cesanta/frozen.o lib/cesanta/mongoose.o
 LEDSCAPE_LIB := libledscape.a
