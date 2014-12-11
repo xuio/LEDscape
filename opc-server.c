@@ -114,6 +114,7 @@ void* udp_server_thread(void* threadarg);
 void* tcp_server_thread(void* threadarg);
 void* e131_server_thread(void* threadarg);
 void* demo_thread(void* threadarg);
+void* partial_frame_thread(void* unused_data);
 
 // Config Methods
 void build_lookup_tables();
@@ -264,24 +265,33 @@ typedef struct {
 // Global runtime data
 static struct
 {
+	/* Framebuffers. These pointers are rotated as data is pushed to the PRUs */
+	// Previous frame pushed to the PRUs
 	buffer_pixel_t* previous_frame_data;
-	buffer_pixel_t* current_frame_data;
-	buffer_pixel_t* next_frame_data;
+	uint8_t has_prev_frame;
+	struct timeval previous_frame_tv;
 
+	// Frame currently being pushed to the PRUs
+	buffer_pixel_t* current_frame_data;
+	uint8_t has_current_frame;
+	struct timeval current_frame_tv;
+
+	// Frame to next push to the PRUs
+	buffer_pixel_t* next_frame_data;
+	uint8_t has_next_frame;
+	struct timeval next_frame_tv;
+
+	// Holds overflow data needed for dithering
 	pixel_delta_t* frame_dithering_overflow;
 
-	uint8_t has_prev_frame;
-	uint8_t has_current_frame;
-	uint8_t has_next_frame;
-
+	// The number of pixels in a frame
 	uint32_t frame_size;
+
+	/* LED count per strip */
 	uint32_t leds_per_strip;
 
+	// Frame counter, incremented on each push to the PRUs
 	volatile uint32_t frame_counter;
-
-	struct timeval previous_frame_tv;
-	struct timeval current_frame_tv;
-	struct timeval next_frame_tv;
 
 	struct timeval prev_current_delta_tv;
 
@@ -290,10 +300,12 @@ static struct
 	char pru0_program_filename[4096];
 	char pru1_program_filename[4096];
 
+	// Lookup tables for converting 8-bit color intensities into 16-bit, luminence corrected colors
 	uint32_t red_lookup[257];
 	uint32_t green_lookup[257];
 	uint32_t blue_lookup[257];
 
+	// Time of last data push from an external source
 	struct timeval last_remote_data_tv;
 
 	pthread_mutex_t mutex;
@@ -315,26 +327,53 @@ static struct
 	.leds = NULL
 };
 
-// Global thread handles
+#define PARTIAL_FRAME_HISTORY_SIZE 48
 typedef struct {
-	pthread_t handle;
-	bool enabled;
-	bool running;
-} thread_state_lt;
+	struct timeval timestamps[PARTIAL_FRAME_HISTORY_SIZE];
+	uint16_t next_index;
+	uint16_t count;
+} channel_data_history_lt;
 
+static struct {
+	// Holds the next frame data before it is fully assembled
+	uint8_t* partial_frame_data;
+	uint32_t leds_per_strip;
+
+	channel_data_history_lt channel_history[LEDSCAPE_NUM_STRIPS];
+
+	struct timeval last_manual_buffer_flush;
+	struct timeval last_partial_push_time;
+
+	pthread_mutex_t mutex;
+} g_partial_frame_data = {
+	.partial_frame_data = (buffer_pixel_t*) NULL,
+	.leds_per_strip = 0,
+	.mutex = PTHREAD_MUTEX_INITIALIZER,
+	.last_manual_buffer_flush = {
+		.tv_sec = 0,
+		.tv_usec = 0
+	},
+	.last_partial_push_time = {
+		.tv_sec = 0,
+		.tv_usec = 0
+	}
+};
+
+// Global thread handles
 static struct
 {
-	thread_state_lt render_thread;
-	thread_state_lt tcp_server_thread;
-	thread_state_lt udp_server_thread;
-	thread_state_lt e131_server_thread;
-	thread_state_lt demo_thread;
+	pthread_t render_thread;
+	pthread_t tcp_server_thread;
+	pthread_t udp_server_thread;
+	pthread_t e131_server_thread;
+	pthread_t demo_thread;
+	pthread_t partial_frame_thread;
 } g_threads = {
-	{NULL, false, false},
-	{NULL, false, false},
-	{NULL, false, false},
-	{NULL, false, false},
-	{NULL, false, false}
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL
 };
 
 
@@ -644,8 +683,8 @@ void handle_args(int argc, char ** argv) {
 							case 'l': printf("Disables luminance correction (lower color values appear brighter than they should)"); break;
 							case 'L': printf("Sets the exponent of the luminance power function to the given floating point value (default 2)"); break;
 							case 'r': printf("Sets the red balance to the given floating point number (0-1, default .9)"); break;
-							case 'g': printf("Sets the red balance to the given floating point number (0-1, default 1)"); break;
-							case 'b': printf("Sets the red balance to the given floating point number (0-1, default 1)"); break;
+							case 'g': printf("Sets the green balance to the given floating point number (0-1, default 1)"); break;
+							case 'b': printf("Sets the blue balance to the given floating point number (0-1, default 1)"); break;
 							case '0': printf("[deprecated] Sets the PRU0 program. Use --mode and --mapping instead."); break;
 							case '1': printf("[deprecated] Sets the PRU1 program. Use --mode and --mapping instead."); break;
 							case 'm':
@@ -723,6 +762,7 @@ int main(int argc, char ** argv)
 	pthread_create(&g_threads.udp_server_thread, NULL, udp_server_thread, NULL);
 	pthread_create(&g_threads.tcp_server_thread, NULL, tcp_server_thread, NULL);
 	pthread_create(&g_threads.e131_server_thread, NULL, e131_server_thread, NULL);
+	pthread_create(&g_threads.partial_frame_thread, NULL, partial_frame_thread, NULL);
 
 	if (g_server_config.demo_mode != DEMO_MODE_NONE) {
 		printf("[main] Demo Mode Enabled\n");
@@ -833,6 +873,7 @@ void ensure_server_setup() {
 			)
 		);
 		g_runtime_state.leds_per_strip = g_server_config.leds_per_strip;
+		g_partial_frame_data.leds_per_strip = g_server_config.leds_per_strip;
 	}
 
 	pthread_mutex_unlock(&g_server_config.mutex);
@@ -1189,18 +1230,21 @@ void ensure_frame_data() {
 	pthread_mutex_lock(&g_runtime_state.mutex);
 	if (g_runtime_state.frame_size != led_count) {
 		fprintf(stderr, "Allocating buffers for %d pixels (%lu bytes)\n", led_count, led_count * 3 /*channels*/ * 4 /*buffers*/ * sizeof(uint16_t));
+		pthread_mutex_lock(&g_partial_frame_data.mutex);
 
 		if (g_runtime_state.previous_frame_data != NULL) {
 			free(g_runtime_state.previous_frame_data);
 			free(g_runtime_state.current_frame_data);
 			free(g_runtime_state.next_frame_data);
 			free(g_runtime_state.frame_dithering_overflow);
+			free(g_partial_frame_data.partial_frame_data);
 		}
 
 		g_runtime_state.frame_size = led_count;
 		g_runtime_state.previous_frame_data = malloc(led_count * sizeof(buffer_pixel_t));
 		g_runtime_state.current_frame_data = malloc(led_count * sizeof(buffer_pixel_t));
 		g_runtime_state.next_frame_data = malloc(led_count * sizeof(buffer_pixel_t));
+		g_partial_frame_data.partial_frame_data = malloc(led_count * sizeof(buffer_pixel_t));
 		g_runtime_state.frame_dithering_overflow = malloc(led_count * sizeof(pixel_delta_t));
 		g_runtime_state.has_next_frame = FALSE;
 		printf("frame_size1=%u\n", g_runtime_state.frame_size);
@@ -1209,6 +1253,8 @@ void ensure_frame_data() {
 		gettimeofday(&g_runtime_state.previous_frame_tv, NULL);
 		gettimeofday(&g_runtime_state.current_frame_tv, NULL);
 		gettimeofday(&g_runtime_state.next_frame_tv, NULL);
+
+		pthread_mutex_unlock(&g_partial_frame_data.mutex);
 	}
 	pthread_mutex_unlock(&g_runtime_state.mutex);
 }
@@ -1231,8 +1277,7 @@ void set_next_frame_data(
 	// Copy in new data
 	memcpy(g_runtime_state.next_frame_data, frame_data, data_size);
 
-	// Zero out any pixels not set by the new frame
-	memset((uint8_t*) g_runtime_state.next_frame_data + data_size, 0, (g_runtime_state.frame_size*3 - data_size));
+	// Data not provided is left as-is, per the OPC spec
 
 	// Update the timestamp & count
 	gettimeofday(&g_runtime_state.next_frame_tv, NULL);
@@ -1561,12 +1606,13 @@ typedef enum
 	OPC_SYSID_FADECANDY = 1,
 
 	// Pending approval from the OPC folks
-		OPC_SYSID_LEDSCAPE = 2
+	OPC_SYSID_LEDSCAPE = 2
 } opc_system_id_t;
 
 typedef enum
 {
-	OPC_LEDSCAPE_CMD_GET_CONFIG = 1
+	OPC_LEDSCAPE_CMD_GET_CONFIG = 1,
+	OPC_LEDSCAPE_CMD_FLUSH_BUFFER = 2,
 } opc_ledscape_cmd_id_t;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1728,6 +1774,135 @@ void* demo_thread(void* unused_data)
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Partial Frame Handling
+//
+
+void set_next_channel_data(
+	uint8_t channel_index,
+	uint8_t* frame_data,
+	uint32_t data_size,
+	uint8_t is_remote
+) {
+	pthread_mutex_lock(&g_partial_frame_data.mutex);
+
+	if (channel_index >= LEDSCAPE_NUM_STRIPS) return;
+
+	uint32_t max_led_count = LEDSCAPE_NUM_STRIPS * g_partial_frame_data.leds_per_strip;
+
+	// Clamp data to prevent overflows
+	data_size = min(data_size/3, max_led_count - (channel_index*g_partial_frame_data.leds_per_strip)) * 3;
+
+	memcpy(
+		g_partial_frame_data.partial_frame_data + channel_index*g_partial_frame_data.leds_per_strip*3,
+		frame_data,
+		data_size
+	);
+	
+	// Add the timestamp to the channel data
+	channel_data_history_lt* channel_history = &g_partial_frame_data.channel_history[channel_index];
+	const uint16_t current_index = channel_history->next_index;
+	channel_history->next_index = (channel_history->next_index + 1) % PARTIAL_FRAME_HISTORY_SIZE;
+	channel_history->count ++;
+	gettimeofday(&channel_history->timestamps[current_index], NULL);
+
+	// Add partial data timestamp
+	gettimeofday(& g_partial_frame_data.last_partial_push_time, NULL);
+
+	pthread_mutex_unlock(&g_partial_frame_data.mutex);
+}
+
+uint32_t seconds_since(struct timeval* other_time) {
+	struct timeval now_tv, delta_tv;
+	gettimeofday(&now_tv, NULL);
+	timersub(&now_tv, other_time, &delta_tv);
+
+	return (uint32_t) delta_tv.tv_sec;
+}
+
+
+void* partial_frame_thread(void* unused_data)
+{
+	const uint32_t partial_data_timeout_seconds = 5;
+	const uint32_t idle_sleep_us = 1000000;
+
+	for (int i=0; i<LEDSCAPE_NUM_STRIPS; i++) {
+		g_partial_frame_data.channel_history[i].count = 0;
+		g_partial_frame_data.channel_history[i].next_index = 0;
+	}
+
+	while (true) {
+		pthread_mutex_lock(&g_partial_frame_data.mutex);
+
+		if (seconds_since(&g_partial_frame_data.last_partial_push_time) < partial_data_timeout_seconds
+			&& seconds_since(&g_partial_frame_data.last_manual_buffer_flush) >= partial_data_timeout_seconds
+		) {
+			set_next_frame_data(
+				g_partial_frame_data.partial_frame_data,
+				g_partial_frame_data.leds_per_strip* LEDSCAPE_NUM_STRIPS*3,
+				true
+			);
+
+			// Compute sleep time
+			{
+				struct timeval delta_tv;
+				uint64_t overall_sum = 0;
+				uint8_t overall_count = 0;
+
+				for (int strip_index =0; strip_index <LEDSCAPE_NUM_STRIPS; strip_index++) {
+					channel_data_history_lt* channel_history = &g_partial_frame_data.channel_history[strip_index];
+
+					uint64_t channel_sum = 0;
+					uint8_t channel_count = 0;
+
+					for (int time_index = 0; time_index < channel_history->count-1 && time_index < PARTIAL_FRAME_HISTORY_SIZE-1; time_index++) {
+						if (seconds_since(&channel_history->timestamps[time_index]) < partial_data_timeout_seconds) {
+							timersub(&channel_history->timestamps[time_index+1], &channel_history->timestamps[time_index], &delta_tv);
+
+							channel_count ++;
+							channel_sum += delta_tv.tv_sec*1000000 + delta_tv.tv_usec;
+						}
+					}
+
+					if (channel_count > 0) {
+						overall_count ++;
+						overall_sum += channel_sum / channel_count;
+					}
+				}
+
+				usleep(overall_sum / overall_count);
+			}
+			pthread_mutex_unlock(&g_partial_frame_data.mutex);
+		} else {
+			pthread_mutex_unlock(&g_partial_frame_data.mutex);
+
+			usleep(idle_sleep_us);
+		}
+	}
+}
+
+void mark_manual_buffer_flush() {
+	pthread_mutex_lock(&g_partial_frame_data.mutex);
+
+	gettimeofday(& g_partial_frame_data.last_manual_buffer_flush, NULL);
+
+	pthread_mutex_unlock(&g_partial_frame_data.mutex);
+}
+
+void manual_buffer_flush() {
+	pthread_mutex_lock(&g_partial_frame_data.mutex);
+
+	set_next_frame_data(
+		g_partial_frame_data.partial_frame_data,
+		g_partial_frame_data.leds_per_strip*LEDSCAPE_NUM_STRIPS*3,
+		true
+	);
+
+	pthread_mutex_unlock(&g_partial_frame_data.mutex);
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // e131 Server
 //
 
@@ -1823,7 +1998,6 @@ void* e131_server_thread(void* unused_data)
 		fprintf(stderr, "[e131] failed to bind to multicast addresses\n");
 	}
 
-	uint8_t* dmx_buffer = NULL;
 	uint32_t dmx_buffer_size = 0;
 
 	uint32_t packets_since_update = 0;
@@ -1843,12 +2017,6 @@ void* e131_server_thread(void* unused_data)
 		uint32_t led_count = g_server_config.leds_per_strip * LEDSCAPE_NUM_STRIPS;
 		pthread_mutex_unlock(&g_server_config.mutex);
 
-		if (dmx_buffer == NULL || dmx_buffer_size != led_count) {
-			if (dmx_buffer != NULL) free(dmx_buffer);
-			dmx_buffer_size = led_count * sizeof(buffer_pixel_t);
-			dmx_buffer = malloc(dmx_buffer_size);
-		}
-
 		// Packet should be at least 126 bytes for the header
 		if (received_packet_size >= 126) {
 			int32_t current_seq_num = packet_buffer[111];
@@ -1862,23 +2030,11 @@ void* e131_server_thread(void* unused_data)
 				if (dmx_universe_num >= 1 && dmx_universe_num <= 48) {
 					uint16_t ledscape_channel_num = dmx_universe_num - 1;
 					// Data OK
-//					set_next_frame_single_channel_data(
-//						ledscape_channel_num,
-//						packet_buffer + 126,
-//						received_packet_size - 126,
-//						TRUE
-//					);
-
-					memcpy(
-						dmx_buffer + ledscape_channel_num * leds_per_strip * sizeof(buffer_pixel_t),
+					set_next_channel_data(
+						ledscape_channel_num,
 						packet_buffer + 126,
-						min(received_packet_size - 126, led_count * sizeof(buffer_pixel_t))
-					);
-
-					set_next_frame_data(
-						dmx_buffer,
-						dmx_buffer_size * sizeof(buffer_pixel_t),
-						TRUE
+						min(received_packet_size - 126, led_count * sizeof(buffer_pixel_t)),
+						true
 					);
 				} else {
 					fprintf(
@@ -1972,7 +2128,20 @@ void* udp_server_thread(void* unused_data)
 			// Enough data for the entire command?
 			if (rc >= sizeof(opc_cmd_t) + cmd_len) {
 				if (cmd->command == 0) {
-					set_next_frame_data(opc_cmd_payload, cmd_len, TRUE);
+					if (cmd->channel == 0) {
+						// Data on channel 0 writes to the entire buffer. Note that this is against the OPC spec,
+						// but for reasons discussed at https://github.com/Yona-Appletree/LEDscape/issues/15 it
+						// is our chosen implementation
+						mark_manual_buffer_flush();
+						set_next_frame_data(opc_cmd_payload, cmd_len, TRUE);
+					} else {
+						set_next_channel_data(
+							cmd->channel-1,
+							opc_cmd_payload,
+							cmd_len,
+							true
+						);
+					}
 				} else if (cmd->command == 255) {
 					// System specific commands
 					const uint16_t system_id = opc_cmd_payload[0] << 8 | opc_cmd_payload[1];
@@ -2013,7 +2182,20 @@ static void event_handler(struct ns_connection *conn, enum ns_event ev, void *ev
 				// Enough data for the entire command?
 				if (io->len >= sizeof(opc_cmd_t) + cmd_len) {
 					if (cmd->command == 0) {
-						set_next_frame_data(opc_cmd_payload, cmd_len, TRUE);
+						if (cmd->channel == 0) {
+							// Data on channel 0 writes to the entire buffer. Note that this is against the OPC spec,
+							// but for reasons discussed at https://github.com/Yona-Appletree/LEDscape/issues/15 it
+							// is our chosen implementation
+							mark_manual_buffer_flush();
+							set_next_frame_data(opc_cmd_payload, cmd_len, TRUE);
+						} else {
+							set_next_channel_data(
+								cmd->channel-1,
+								opc_cmd_payload,
+								cmd_len,
+								true
+							);
+						}
 					} else if (cmd->command == 255) {
 						// System specific commands
 						const uint16_t system_id = opc_cmd_payload[0] << 8 | opc_cmd_payload[1];
