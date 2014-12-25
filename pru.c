@@ -52,6 +52,9 @@ pru_init(
 		&pru_data_mem
 	);
 
+	// Clear the data memory
+	memset(pru_data_mem, 0, 512);
+
 	const int mem_fd = open("/dev/mem", O_RDWR);
 	if (mem_fd < 0)
 		die("Failed to open /dev/mem: %s\n", strerror(errno));

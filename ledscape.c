@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include "ledscape.h"
+#include "pru.h"
 
 
 /** GPIO pins used by the LEDscape.
@@ -104,6 +105,48 @@ ledscape_draw(
 	leds->ws281x_1->command = 1;
 }
 
+void hexDump (char *desc, void *addr, int len) {
+	int i;
+	unsigned char buff[17];
+	unsigned char *pc = (unsigned char*)addr;
+
+	// Output description if given.
+	if (desc != NULL)
+		printf ("%s:\n", desc);
+
+	// Process every byte in the data.
+	for (i = 0; i < len; i++) {
+		// Multiple of 16 means new line (with line offset).
+
+		if ((i % 16) == 0) {
+			// Just don't print ASCII for the zeroth line.
+			if (i != 0)
+				printf ("  %s\n", buff);
+
+			// Output the offset.
+			printf ("  %04x ", i);
+		}
+
+		// Now the hex code for the specific character.
+		printf (" %02x", pc[i]);
+
+		// And store a printable ASCII character for later.
+		if ((pc[i] < 0x20) || (pc[i] > 0x7e))
+			buff[i % 16] = '.';
+		else
+			buff[i % 16] = pc[i];
+		buff[(i % 16) + 1] = '\0';
+	}
+
+	// Pad out last line if not exactly 16 characters.
+	while ((i % 16) != 0) {
+		printf ("   ");
+		i++;
+	}
+
+	// And print the final ASCII bit.
+	printf ("  %s\n", buff);
+}
 
 /** Wait for the current frame to finish transfering to the strips.
  * \returns a token indicating the response code.
@@ -121,6 +164,9 @@ ledscape_wait(
 		// 	leds->ws281x_0->command, leds->ws281x_0->response,
 		// 	leds->ws281x_1->command, leds->ws281x_1->response
 		// );
+
+		hexDump("PRU0 DATA", leds->pru0->data_ram, 16 + 24*4);
+		hexDump("PRU1 DATA", leds->pru1->data_ram, 16 + 24*4);
 
 		if (leds->ws281x_0->response && leds->ws281x_1->response) return;
 	}
