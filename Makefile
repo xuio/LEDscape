@@ -36,6 +36,7 @@ CFLAGS += \
 	-I. \
 	-O2 \
 	-lm \
+	-g \
 	-mtune=cortex-a8 \
 	-march=armv7-a \
 	-Wunused-parameter \

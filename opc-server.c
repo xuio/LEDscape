@@ -103,10 +103,15 @@ char g_config_filename[4096] = {0};
 void teardown_server();
 void ensure_server_setup();
 
-// Frame Manipulation
+// Direct Frame Manipulation
 void ensure_frame_data();
-void set_next_frame_data(uint8_t* frame_data, uint32_t data_size, uint8_t is_remote);
+void load_next_frame_data(uint8_t* frame_data, uint32_t data_size, bool is_remote);
 void rotate_frames(uint8_t lock_frame_data);
+
+// Framebuffer Manipulation
+void buffer_next_channel_data(uint8_t channel_index, uint8_t *frame_data, uint32_t data_size, bool is_remote);
+void buffer_next_frame_data(uint8_t* frame_data, uint32_t data_size, bool is_remote);
+void flush_frame_buffer(bool lock_buffer_mutex, bool auto_flush, bool force_remote);
 
 // Threads
 void* render_thread(void* threadarg);
@@ -114,7 +119,7 @@ void* udp_server_thread(void* threadarg);
 void* tcp_server_thread(void* threadarg);
 void* e131_server_thread(void* threadarg);
 void* demo_thread(void* threadarg);
-void* partial_frame_thread(void* unused_data);
+void*buffered_frame_thread(void *unused_data);
 
 // Config Methods
 void build_lookup_tables();
@@ -328,32 +333,55 @@ static struct
 };
 
 #define PARTIAL_FRAME_HISTORY_SIZE 48
+
 typedef struct {
+	// History of times when this channel was updated
 	struct timeval timestamps[PARTIAL_FRAME_HISTORY_SIZE];
+
+	// The next index in `timestamps` to use
 	uint16_t next_index;
+
+	// The number of timestamps that have been written to this history
 	uint16_t count;
 } channel_data_history_lt;
 
 static struct {
 	// Holds the next frame data before it is fully assembled
-	uint8_t* partial_frame_data;
+	uint8_t*buffered_frame_data;
+
+	// Cached copy of the server config value
 	uint32_t leds_per_strip;
 
+	// Keeps track of when channel updates came in
 	channel_data_history_lt channel_history[LEDSCAPE_NUM_STRIPS];
 
+	// The last time the buffer was manually flushed
 	struct timeval last_manual_buffer_flush;
-	struct timeval last_partial_push_time;
 
+	// The last time the buffer was automatically flused
+	struct timeval last_auto_buffer_flush;
+
+	// The last time data for a single channel was received
+	struct timeval last_channel_update_time;
+
+	bool remote_data_received_since_last_auto_flush;
+
+	// Mutex for locking
 	pthread_mutex_t mutex;
-} g_partial_frame_data = {
-	.partial_frame_data = (buffer_pixel_t*) NULL,
+} g_buffered_frame_data = {
+	.buffered_frame_data = (buffer_pixel_t*) NULL,
 	.leds_per_strip = 0,
 	.mutex = PTHREAD_MUTEX_INITIALIZER,
+	.remote_data_received_since_last_auto_flush = false,
 	.last_manual_buffer_flush = {
 		.tv_sec = 0,
 		.tv_usec = 0
 	},
-	.last_partial_push_time = {
+	.last_auto_buffer_flush = {
+		.tv_sec = 0,
+		.tv_usec = 0
+	},
+	.last_channel_update_time = {
 		.tv_sec = 0,
 		.tv_usec = 0
 	}
@@ -762,7 +790,7 @@ int main(int argc, char ** argv)
 	pthread_create(&g_threads.udp_server_thread, NULL, udp_server_thread, NULL);
 	pthread_create(&g_threads.tcp_server_thread, NULL, tcp_server_thread, NULL);
 	pthread_create(&g_threads.e131_server_thread, NULL, e131_server_thread, NULL);
-	pthread_create(&g_threads.partial_frame_thread, NULL, partial_frame_thread, NULL);
+	pthread_create(&g_threads.partial_frame_thread, NULL, buffered_frame_thread, NULL);
 
 	if (g_server_config.demo_mode != DEMO_MODE_NONE) {
 		printf("[main] Demo Mode Enabled\n");
@@ -873,7 +901,7 @@ void ensure_server_setup() {
 			)
 		);
 		g_runtime_state.leds_per_strip = g_server_config.leds_per_strip;
-		g_partial_frame_data.leds_per_strip = g_server_config.leds_per_strip;
+		g_buffered_frame_data.leds_per_strip = g_server_config.leds_per_strip;
 	}
 
 	pthread_mutex_unlock(&g_server_config.mutex);
@@ -1230,21 +1258,21 @@ void ensure_frame_data() {
 	pthread_mutex_lock(&g_runtime_state.mutex);
 	if (g_runtime_state.frame_size != led_count) {
 		fprintf(stderr, "Allocating buffers for %d pixels (%lu bytes)\n", led_count, led_count * 3 /*channels*/ * 4 /*buffers*/ * sizeof(uint16_t));
-		pthread_mutex_lock(&g_partial_frame_data.mutex);
+		pthread_mutex_lock(&g_buffered_frame_data.mutex);
 
 		if (g_runtime_state.previous_frame_data != NULL) {
 			free(g_runtime_state.previous_frame_data);
 			free(g_runtime_state.current_frame_data);
 			free(g_runtime_state.next_frame_data);
 			free(g_runtime_state.frame_dithering_overflow);
-			free(g_partial_frame_data.partial_frame_data);
+			free(g_buffered_frame_data.buffered_frame_data);
 		}
 
 		g_runtime_state.frame_size = led_count;
 		g_runtime_state.previous_frame_data = malloc(led_count * sizeof(buffer_pixel_t));
 		g_runtime_state.current_frame_data = malloc(led_count * sizeof(buffer_pixel_t));
 		g_runtime_state.next_frame_data = malloc(led_count * sizeof(buffer_pixel_t));
-		g_partial_frame_data.partial_frame_data = malloc(led_count * sizeof(buffer_pixel_t));
+		g_buffered_frame_data.buffered_frame_data = malloc(led_count * sizeof(buffer_pixel_t));
 		g_runtime_state.frame_dithering_overflow = malloc(led_count * sizeof(pixel_delta_t));
 		g_runtime_state.has_next_frame = FALSE;
 		printf("frame_size1=%u\n", g_runtime_state.frame_size);
@@ -1254,7 +1282,7 @@ void ensure_frame_data() {
 		gettimeofday(&g_runtime_state.current_frame_tv, NULL);
 		gettimeofday(&g_runtime_state.next_frame_tv, NULL);
 
-		pthread_mutex_unlock(&g_partial_frame_data.mutex);
+		pthread_mutex_unlock(&g_buffered_frame_data.mutex);
 	}
 	pthread_mutex_unlock(&g_runtime_state.mutex);
 }
@@ -1262,10 +1290,10 @@ void ensure_frame_data() {
 /**
 * Set the next frame of data to the given 8-bit RGB buffer after rotating the buffers.
 */
-void set_next_frame_data(
+void load_next_frame_data(
 	uint8_t* frame_data,
 	uint32_t data_size,
-	uint8_t is_remote
+	bool is_remote
 ) {
 	pthread_mutex_lock(&g_runtime_state.mutex);
 
@@ -1762,7 +1790,7 @@ void* demo_thread(void* unused_data)
 				}
 			}
 
-			set_next_frame_data(buffer, buffer_size, FALSE);
+			buffer_next_frame_data(buffer, buffer_size, FALSE);
 		}
 
 		usleep(1e6/30);
@@ -1774,130 +1802,177 @@ void* demo_thread(void* unused_data)
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// Partial Frame Handling
+// Frame Buffer Handling
 //
 
-void set_next_channel_data(
+void buffer_next_channel_data(
 	uint8_t channel_index,
-	uint8_t* frame_data,
+	uint8_t *frame_data,
 	uint32_t data_size,
-	uint8_t is_remote
+	bool is_remote
 ) {
-	pthread_mutex_lock(&g_partial_frame_data.mutex);
+	pthread_mutex_lock(&g_buffered_frame_data.mutex);
 
-	if (channel_index >= LEDSCAPE_NUM_STRIPS) return;
+	if (channel_index < LEDSCAPE_NUM_STRIPS) {
+		uint32_t max_led_count = LEDSCAPE_NUM_STRIPS * g_buffered_frame_data.leds_per_strip;
 
-	uint32_t max_led_count = LEDSCAPE_NUM_STRIPS * g_partial_frame_data.leds_per_strip;
+		// Clamp data to prevent overflows
+		data_size = min(data_size/3, max_led_count - (channel_index* g_buffered_frame_data.leds_per_strip)) * 3;
 
-	// Clamp data to prevent overflows
-	data_size = min(data_size/3, max_led_count - (channel_index*g_partial_frame_data.leds_per_strip)) * 3;
+		memcpy(
+			g_buffered_frame_data.buffered_frame_data + channel_index* g_buffered_frame_data.leds_per_strip*3,
+			frame_data,
+			data_size
+		);
 
-	memcpy(
-		g_partial_frame_data.partial_frame_data + channel_index*g_partial_frame_data.leds_per_strip*3,
-		frame_data,
-		data_size
-	);
-	
-	// Add the timestamp to the channel data
-	channel_data_history_lt* channel_history = &g_partial_frame_data.channel_history[channel_index];
-	const uint16_t current_index = channel_history->next_index;
-	channel_history->next_index = (channel_history->next_index + 1) % PARTIAL_FRAME_HISTORY_SIZE;
-	channel_history->count ++;
-	gettimeofday(&channel_history->timestamps[current_index], NULL);
+		// Add the timestamp to the channel data
+		channel_data_history_lt* channel_history = &g_buffered_frame_data.channel_history[channel_index];
+		const uint16_t current_index = channel_history->next_index;
+		channel_history->next_index = (channel_history->next_index + 1) % PARTIAL_FRAME_HISTORY_SIZE;
+		channel_history->count ++;
+		gettimeofday(&channel_history->timestamps[current_index], NULL);
 
-	// Add partial data timestamp
-	gettimeofday(& g_partial_frame_data.last_partial_push_time, NULL);
+		if (is_remote) {
+			g_buffered_frame_data.remote_data_received_since_last_auto_flush = true;
+		}
 
-	pthread_mutex_unlock(&g_partial_frame_data.mutex);
+		// Add partial data timestamp
+		gettimeofday(& g_buffered_frame_data.last_channel_update_time, NULL);
+	}
+
+	pthread_mutex_unlock(&g_buffered_frame_data.mutex);
 }
 
-uint32_t seconds_since(struct timeval* other_time) {
+int64_t seconds_since(struct timeval* other_time) {
 	struct timeval now_tv, delta_tv;
 	gettimeofday(&now_tv, NULL);
 	timersub(&now_tv, other_time, &delta_tv);
 
-	return (uint32_t) delta_tv.tv_sec;
+	return delta_tv.tv_sec;
 }
 
+int64_t micros_between(struct timeval* a, struct timeval* b) {
+	struct timeval c;
+	timersub(a, b, &c);
+	return c.tv_sec*1000000 + c.tv_usec;
+}
 
-void* partial_frame_thread(void* unused_data)
+void flush_frame_buffer(
+	bool lock_buffer_mutex,
+	bool auto_flush,
+	bool force_remote
+) {
+	if (lock_buffer_mutex) pthread_mutex_lock(&g_buffered_frame_data.mutex);
+
+	gettimeofday(
+		auto_flush
+			? &g_buffered_frame_data.last_auto_buffer_flush
+			: &g_buffered_frame_data.last_manual_buffer_flush,
+		NULL
+	);
+
+	load_next_frame_data(
+		g_buffered_frame_data.buffered_frame_data,
+		g_buffered_frame_data.leds_per_strip* LEDSCAPE_NUM_STRIPS*3,
+		force_remote || (auto_flush && g_buffered_frame_data.remote_data_received_since_last_auto_flush)
+	);
+
+	if (auto_flush) {
+		g_buffered_frame_data.remote_data_received_since_last_auto_flush = false;
+	}
+
+	if (lock_buffer_mutex) pthread_mutex_unlock(&g_buffered_frame_data.mutex);
+}
+
+void* buffered_frame_thread(void *unused_data)
 {
 	const uint32_t partial_data_timeout_seconds = 5;
 	const uint32_t idle_sleep_us = 1000000;
 
 	for (int i=0; i<LEDSCAPE_NUM_STRIPS; i++) {
-		g_partial_frame_data.channel_history[i].count = 0;
-		g_partial_frame_data.channel_history[i].next_index = 0;
+		g_buffered_frame_data.channel_history[i].count = 0;
+		g_buffered_frame_data.channel_history[i].next_index = 0;
 	}
 
 	while (true) {
-		pthread_mutex_lock(&g_partial_frame_data.mutex);
+		pthread_mutex_lock(&g_buffered_frame_data.mutex);
 
-		if (seconds_since(&g_partial_frame_data.last_partial_push_time) < partial_data_timeout_seconds
-			&& seconds_since(&g_partial_frame_data.last_manual_buffer_flush) >= partial_data_timeout_seconds
+		if (seconds_since(&g_buffered_frame_data.last_channel_update_time) < partial_data_timeout_seconds
+			&& seconds_since(&g_buffered_frame_data.last_manual_buffer_flush) >= partial_data_timeout_seconds
 		) {
-			set_next_frame_data(
-				g_partial_frame_data.partial_frame_data,
-				g_partial_frame_data.leds_per_strip* LEDSCAPE_NUM_STRIPS*3,
-				true
-			);
+			// Update the frame buffer if any data has been received since the last update
+			if (micros_between(&g_buffered_frame_data.last_auto_buffer_flush, &g_buffered_frame_data.last_channel_update_time) > 0) {
+				flush_frame_buffer(false, true, false);
+			}
 
 			// Compute sleep time
-			{
-				struct timeval delta_tv;
-				uint64_t overall_sum = 0;
-				uint8_t overall_count = 0;
+			struct timeval delta_tv;
+			uint64_t overall_sum = 0;
+			uint8_t overall_count = 0;
 
-				for (int strip_index =0; strip_index <LEDSCAPE_NUM_STRIPS; strip_index++) {
-					channel_data_history_lt* channel_history = &g_partial_frame_data.channel_history[strip_index];
+			for (int strip_index =0; strip_index <LEDSCAPE_NUM_STRIPS; strip_index++) {
+				channel_data_history_lt* channel_history = &g_buffered_frame_data.channel_history[strip_index];
 
-					uint64_t channel_sum = 0;
-					uint8_t channel_count = 0;
+				uint64_t channel_sum = 0;
+				uint8_t channel_count = 0;
 
-					for (int time_index = 0; time_index < channel_history->count-1 && time_index < PARTIAL_FRAME_HISTORY_SIZE-1; time_index++) {
-						if (seconds_since(&channel_history->timestamps[time_index]) < partial_data_timeout_seconds) {
-							timersub(&channel_history->timestamps[time_index+1], &channel_history->timestamps[time_index], &delta_tv);
+				for (int time_index = 0; time_index < channel_history->count-1 && time_index < PARTIAL_FRAME_HISTORY_SIZE-1; time_index++) {
+					if (seconds_since(&channel_history->timestamps[time_index+1]) < partial_data_timeout_seconds) {
+						timersub(&channel_history->timestamps[time_index+1], &channel_history->timestamps[time_index], &delta_tv);
 
-							channel_count ++;
-							channel_sum += delta_tv.tv_sec*1000000 + delta_tv.tv_usec;
-						}
-					}
-
-					if (channel_count > 0) {
-						overall_count ++;
-						overall_sum += channel_sum / channel_count;
+						channel_count ++;
+						channel_sum += delta_tv.tv_sec*1000000 + delta_tv.tv_usec;
 					}
 				}
 
-				usleep(overall_sum / overall_count);
+				if (channel_count > 0) {
+					overall_count ++;
+					overall_sum += channel_sum / channel_count;
+				}
 			}
-			pthread_mutex_unlock(&g_partial_frame_data.mutex);
+
+			pthread_mutex_unlock(&g_buffered_frame_data.mutex);
+
+			if (overall_count == 0) {
+				usleep(idle_sleep_us);
+			} else {
+
+				uint64_t sleep_for = overall_sum / overall_count;
+
+				printf("Sleep for: %qu us (%qu fps)\n",sleep_for, 1000000 / sleep_for);
+				usleep(sleep_for < idle_sleep_us ? sleep_for : idle_sleep_us);
+			}
 		} else {
-			pthread_mutex_unlock(&g_partial_frame_data.mutex);
+			for (int strip_index =0; strip_index <LEDSCAPE_NUM_STRIPS; strip_index++) {
+				for (int time_index = 0; time_index < PARTIAL_FRAME_HISTORY_SIZE-1; time_index++) {
+					g_buffered_frame_data.channel_history[strip_index].timestamps[time_index].tv_usec = 0;
+					g_buffered_frame_data.channel_history[strip_index].timestamps[time_index].tv_sec = 0;
+				}
+			}
+			pthread_mutex_unlock(&g_buffered_frame_data.mutex);
 
 			usleep(idle_sleep_us);
 		}
 	}
 }
 
-void mark_manual_buffer_flush() {
-	pthread_mutex_lock(&g_partial_frame_data.mutex);
+void buffer_next_frame_data(
+	uint8_t* frame_data,
+	uint32_t data_size,
+	bool is_remote
+) {
+	pthread_mutex_lock(&g_buffered_frame_data.mutex);
+	gettimeofday(& g_buffered_frame_data.last_manual_buffer_flush, NULL);
 
-	gettimeofday(& g_partial_frame_data.last_manual_buffer_flush, NULL);
+	// Prevent buffer overruns
+	data_size = min(data_size, g_runtime_state.frame_size * 3);
 
-	pthread_mutex_unlock(&g_partial_frame_data.mutex);
-}
+	// Copy in new data
+	memcpy(g_buffered_frame_data.buffered_frame_data, frame_data, data_size);
 
-void manual_buffer_flush() {
-	pthread_mutex_lock(&g_partial_frame_data.mutex);
+	flush_frame_buffer(false, false, is_remote);
 
-	set_next_frame_data(
-		g_partial_frame_data.partial_frame_data,
-		g_partial_frame_data.leds_per_strip*LEDSCAPE_NUM_STRIPS*3,
-		true
-	);
-
-	pthread_mutex_unlock(&g_partial_frame_data.mutex);
+	pthread_mutex_unlock(&g_buffered_frame_data.mutex);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2030,7 +2105,7 @@ void* e131_server_thread(void* unused_data)
 				if (dmx_universe_num >= 1 && dmx_universe_num <= 48) {
 					uint16_t ledscape_channel_num = dmx_universe_num - 1;
 					// Data OK
-					set_next_channel_data(
+					buffer_next_channel_data(
 						ledscape_channel_num,
 						packet_buffer + 126,
 						min(received_packet_size - 126, led_count * sizeof(buffer_pixel_t)),
@@ -2126,17 +2201,17 @@ void* udp_server_thread(void* unused_data)
 			uint8_t* opc_cmd_payload = ((uint8_t*)buf) + sizeof(opc_cmd_t);
 
 			// Enough data for the entire command?
+
 			if (rc >= sizeof(opc_cmd_t) + cmd_len) {
 				if (cmd->command == 0) {
 					if (cmd->channel == 0) {
 						// Data on channel 0 writes to the entire buffer. Note that this is against the OPC spec,
 						// but for reasons discussed at https://github.com/Yona-Appletree/LEDscape/issues/15 it
 						// is our chosen implementation
-						mark_manual_buffer_flush();
-						set_next_frame_data(opc_cmd_payload, cmd_len, TRUE);
+						buffer_next_frame_data(opc_cmd_payload, cmd_len, TRUE);
 					} else {
-						set_next_channel_data(
-							cmd->channel-1,
+						buffer_next_channel_data(
+							cmd->channel - 1,
 							opc_cmd_payload,
 							cmd_len,
 							true
@@ -2149,7 +2224,13 @@ void* udp_server_thread(void* unused_data)
 					if (system_id == OPC_SYSID_LEDSCAPE) {
 						const opc_ledscape_cmd_id_t ledscape_cmd_id = opc_cmd_payload[2];
 
-						if (ledscape_cmd_id == OPC_LEDSCAPE_CMD_GET_CONFIG) {
+						if (ledscape_cmd_id == OPC_LEDSCAPE_CMD_FLUSH_BUFFER) {
+							flush_frame_buffer(
+								true, // lock_buffer_mutex
+								false, // auto_flush
+								false // force_remote
+							);
+						} else if (ledscape_cmd_id == OPC_LEDSCAPE_CMD_GET_CONFIG) {
 							warn("[udp] WARN: Config request request received but not supported on UDP.\n");
 						} else {
 							warn("[udp] WARN: Received command for unsupported LEDscape Command: %d\n", (int)ledscape_cmd_id);
@@ -2186,11 +2267,10 @@ static void event_handler(struct ns_connection *conn, enum ns_event ev, void *ev
 							// Data on channel 0 writes to the entire buffer. Note that this is against the OPC spec,
 							// but for reasons discussed at https://github.com/Yona-Appletree/LEDscape/issues/15 it
 							// is our chosen implementation
-							mark_manual_buffer_flush();
-							set_next_frame_data(opc_cmd_payload, cmd_len, TRUE);
+							buffer_next_frame_data(opc_cmd_payload, cmd_len, TRUE);
 						} else {
-							set_next_channel_data(
-								cmd->channel-1,
+							buffer_next_channel_data(
+								cmd->channel - 1,
 								opc_cmd_payload,
 								cmd_len,
 								true
@@ -2203,7 +2283,13 @@ static void event_handler(struct ns_connection *conn, enum ns_event ev, void *ev
 						if (system_id == OPC_SYSID_LEDSCAPE) {
 							const opc_ledscape_cmd_id_t ledscape_cmd_id = opc_cmd_payload[2];
 
-							if (ledscape_cmd_id == OPC_LEDSCAPE_CMD_GET_CONFIG) {
+							if (ledscape_cmd_id == OPC_LEDSCAPE_CMD_FLUSH_BUFFER) {
+								flush_frame_buffer(
+									true, // lock_buffer_mutex
+									false, // auto_flush
+									false // force_remote
+								);
+							} else if (ledscape_cmd_id == OPC_LEDSCAPE_CMD_GET_CONFIG) {
 								warn("[tcp] Responding to config request\n");
 								ns_send(conn, g_server_config.json, strlen(g_server_config.json)+1);
 							} else {
