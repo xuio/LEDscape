@@ -412,8 +412,10 @@ process.stderr.write("Using mapping: " + pinMapping.name + " from " + mappingFil
 if (pinMapping.mappedPinNumberToOriginalPinNumberMap) {
 	for (var i = 0; i<totalUsedPinCount; i++) {
 		var pin = pinsByPruChannel[pinMapping.mappedPinNumberToOriginalPinNumberMap[i]];
-		pinsByMappedChannelIndex[i] = pin;
-		pin.mappedChannelIndex = i;
+		if (pin) {
+			pinsByMappedChannelIndex[i] = pin;
+			pin.mappedChannelIndex = i;
+		}
 	}
 
 	commandFunc();

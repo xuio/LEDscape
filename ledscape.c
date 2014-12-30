@@ -27,19 +27,20 @@
  * TODO: Find a way to unify this with the defines in the .p file
  */
 static const uint8_t gpios0[] = {
-	2, 3, 7, 8, 9, 10, 11, 14, 20, 22, 23, 26, 27, 30, 31
+	//2, 3, 7, 8, 9, 10, 11, 14, 20, 22, 23, 26, 27, 30, 31
 };
 
 static const uint8_t gpios1[] = {
-	12, 13, 14, 15, 16, 17, 18, 19, 28, 29
+	//12, 14, 15, 16, 17, 18, 19, 28, 29,
+	13
 };
 
 static const uint8_t gpios2[] = {
-	1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 22, 23, 24, 25,
+	//1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 22, 23, 24, 25,
 };
 
 static const uint8_t gpios3[] = {
-	14, 15, 16, 17, 19, 21
+	//14, 15, 16, 17, 19, 21
 };
 
 #define ARRAY_COUNT(a) ((sizeof(a) / sizeof(*a)))

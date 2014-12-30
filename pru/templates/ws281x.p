@@ -104,24 +104,26 @@ l_word_loop:
 		// Zero out the registers
 		RESET_GPIO_ZEROS()
 
+		#if PRU_NUM == 0
 		TEST_BIT_ZERO(r_data0,  0)
-		TEST_BIT_ZERO(r_data1,  1)
-		TEST_BIT_ZERO(r_data2,  2)
-		TEST_BIT_ZERO(r_data3,  3)
-		TEST_BIT_ZERO(r_data4,  4)
-		TEST_BIT_ZERO(r_data5,  5)
-		TEST_BIT_ZERO(r_data6,  6)
-		TEST_BIT_ZERO(r_data7,  7)
-
-		TEST_BIT_ZERO(r_data8,  8)
-		TEST_BIT_ZERO(r_data9,  9)
-		TEST_BIT_ZERO(r_data10, 10)
-		TEST_BIT_ZERO(r_data11, 11)
-		TEST_BIT_ZERO(r_data12, 12)
-		TEST_BIT_ZERO(r_data13, 13)
-
-		TEST_BIT_ZERO(r_data14, 14)
-		TEST_BIT_ZERO(r_data15, 15)
+		#endif
+//		TEST_BIT_ZERO(r_data1,  1)
+//		TEST_BIT_ZERO(r_data2,  2)
+//		TEST_BIT_ZERO(r_data3,  3)
+//		TEST_BIT_ZERO(r_data4,  4)
+//		TEST_BIT_ZERO(r_data5,  5)
+//		TEST_BIT_ZERO(r_data6,  6)
+//		TEST_BIT_ZERO(r_data7,  7)
+//
+//		TEST_BIT_ZERO(r_data8,  8)
+//		TEST_BIT_ZERO(r_data9,  9)
+//		TEST_BIT_ZERO(r_data10, 10)
+//		TEST_BIT_ZERO(r_data11, 11)
+//		TEST_BIT_ZERO(r_data12, 12)
+//		TEST_BIT_ZERO(r_data13, 13)
+//
+//		TEST_BIT_ZERO(r_data14, 14)
+//		TEST_BIT_ZERO(r_data15, 15)
 
 		// Load 8 more registers of data
 		LOAD_CHANNEL_DATA(24, 16, 8)
@@ -151,14 +153,14 @@ l_word_loop:
 		PREP_GPIO_ADDRS_FOR_CLEAR()
 
 		// Test some more bits to pass the time
-		TEST_BIT_ZERO(r_data0, 16)
-		TEST_BIT_ZERO(r_data1, 17)
-		TEST_BIT_ZERO(r_data2, 18)
-		TEST_BIT_ZERO(r_data3, 19)
-		TEST_BIT_ZERO(r_data4, 20)
-		TEST_BIT_ZERO(r_data5, 21)
-		TEST_BIT_ZERO(r_data6, 22)
-		TEST_BIT_ZERO(r_data7, 23)
+//		TEST_BIT_ZERO(r_data0, 16)
+//		TEST_BIT_ZERO(r_data1, 17)
+//		TEST_BIT_ZERO(r_data2, 18)
+//		TEST_BIT_ZERO(r_data3, 19)
+//		TEST_BIT_ZERO(r_data4, 20)
+//		TEST_BIT_ZERO(r_data5, 21)
+//		TEST_BIT_ZERO(r_data6, 22)
+//		TEST_BIT_ZERO(r_data7, 23)
 
 		WAITNS 240, wait_zero_time
 		CHECK_TIMEOUT
