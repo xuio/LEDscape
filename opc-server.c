@@ -356,7 +356,7 @@ static struct {
 	channel_data_history_lt channel_history[LEDSCAPE_NUM_STRIPS];
 
 	// The last time the buffer was manually flushed
-	struct timeval last_manual_buffer_flush;
+	struct timeval last_remote_manual_buffer_flush;
 
 	// The last time the buffer was automatically flused
 	struct timeval last_auto_buffer_flush;
@@ -373,7 +373,7 @@ static struct {
 	.leds_per_strip = 0,
 	.mutex = PTHREAD_MUTEX_INITIALIZER,
 	.remote_data_received_since_last_auto_flush = false,
-	.last_manual_buffer_flush = {
+	.last_remote_manual_buffer_flush = {
 		.tv_sec = 0,
 		.tv_usec = 0
 	},
@@ -1790,7 +1790,7 @@ void* demo_thread(void* unused_data)
 				}
 			}
 
-			buffer_next_frame_data(buffer, buffer_size, FALSE);
+			buffer_next_frame_data(buffer, buffer_size, false);
 		}
 
 		usleep(1e6/30);
@@ -1851,9 +1851,9 @@ int64_t seconds_since(struct timeval* other_time) {
 	return delta_tv.tv_sec;
 }
 
-int64_t micros_between(struct timeval* a, struct timeval* b) {
+int64_t micros_between(struct timeval* earlier, struct timeval* later) {
 	struct timeval c;
-	timersub(a, b, &c);
+	timersub(later, earlier, &c);
 	return c.tv_sec*1000000 + c.tv_usec;
 }
 
@@ -1864,17 +1864,19 @@ void flush_frame_buffer(
 ) {
 	if (lock_buffer_mutex) pthread_mutex_lock(&g_buffered_frame_data.mutex);
 
-	gettimeofday(
-		auto_flush
-			? &g_buffered_frame_data.last_auto_buffer_flush
-			: &g_buffered_frame_data.last_manual_buffer_flush,
-		NULL
-	);
+	bool is_remote = force_remote || (auto_flush && g_buffered_frame_data.remote_data_received_since_last_auto_flush);
+
+	if (auto_flush) {
+		gettimeofday(&g_buffered_frame_data.last_auto_buffer_flush, NULL);
+	}
+	else if (is_remote) {
+		gettimeofday(&g_buffered_frame_data.last_remote_manual_buffer_flush, NULL);
+	}
 
 	load_next_frame_data(
 		g_buffered_frame_data.buffered_frame_data,
-		g_buffered_frame_data.leds_per_strip* LEDSCAPE_NUM_STRIPS*3,
-		force_remote || (auto_flush && g_buffered_frame_data.remote_data_received_since_last_auto_flush)
+		g_buffered_frame_data.leds_per_strip * LEDSCAPE_NUM_STRIPS * 3,
+		is_remote
 	);
 
 	if (auto_flush) {
@@ -1886,7 +1888,7 @@ void flush_frame_buffer(
 
 void* buffered_frame_thread(void *unused_data)
 {
-	const uint32_t partial_data_timeout_seconds = 5;
+	const uint32_t buffer_data_timeout_seconds = 5;
 	const uint32_t idle_sleep_us = 1000000;
 
 	for (int i=0; i<LEDSCAPE_NUM_STRIPS; i++) {
@@ -1894,15 +1896,39 @@ void* buffered_frame_thread(void *unused_data)
 		g_buffered_frame_data.channel_history[i].next_index = 0;
 	}
 
+	// Initialize the timestamps with real times
+	pthread_mutex_lock(&g_buffered_frame_data.mutex);
+	gettimeofday(&g_buffered_frame_data.last_auto_buffer_flush, NULL);
+	gettimeofday(&g_buffered_frame_data.last_channel_update_time, NULL);
+	gettimeofday(&g_buffered_frame_data.last_remote_manual_buffer_flush, NULL);
+	pthread_mutex_unlock(&g_buffered_frame_data.mutex);
+
 	while (true) {
 		pthread_mutex_lock(&g_buffered_frame_data.mutex);
+//
+//		printf(
+//			"last_channel_update_time: %qi; last_remote_manual_buffer_flush: %qi\n",
+//			seconds_since(&g_buffered_frame_data.last_channel_update_time),
+//			seconds_since(&g_buffered_frame_data.last_remote_manual_buffer_flush)
+//		);
 
-		if (seconds_since(&g_buffered_frame_data.last_channel_update_time) < partial_data_timeout_seconds
-			&& seconds_since(&g_buffered_frame_data.last_manual_buffer_flush) >= partial_data_timeout_seconds
+		if (seconds_since(&g_buffered_frame_data.last_channel_update_time) < buffer_data_timeout_seconds
+			&& seconds_since(&g_buffered_frame_data.last_remote_manual_buffer_flush) >= buffer_data_timeout_seconds
 		) {
 			// Update the frame buffer if any data has been received since the last update
-			if (micros_between(&g_buffered_frame_data.last_auto_buffer_flush, &g_buffered_frame_data.last_channel_update_time) > 0) {
-				flush_frame_buffer(false, true, false);
+//			printf("last_channel_update_time(%li) - last_auto_buffer_flush(%li): %qi\n",
+//				g_buffered_frame_data.last_channel_update_time.tv_sec*1000000 + g_buffered_frame_data.last_channel_update_time.tv_usec,
+//				g_buffered_frame_data.last_auto_buffer_flush.tv_sec*1000000 + g_buffered_frame_data.last_auto_buffer_flush.tv_usec,
+//				micros_between(&g_buffered_frame_data.last_auto_buffer_flush, &g_buffered_frame_data.last_channel_update_time)
+//			);
+			if (
+				micros_between(&g_buffered_frame_data.last_auto_buffer_flush, &g_buffered_frame_data.last_channel_update_time) > 0
+			) {
+				flush_frame_buffer(
+					/* lock_buffer_mutex */ false,
+					/* auto_flush */true,
+					/* force_remote */false
+				);
 			}
 
 			// Compute sleep time
@@ -1917,11 +1943,14 @@ void* buffered_frame_thread(void *unused_data)
 				uint8_t channel_count = 0;
 
 				for (int time_index = 0; time_index < channel_history->count-1 && time_index < PARTIAL_FRAME_HISTORY_SIZE-1; time_index++) {
-					if (seconds_since(&channel_history->timestamps[time_index+1]) < partial_data_timeout_seconds) {
+					if (seconds_since(&channel_history->timestamps[time_index+1]) < buffer_data_timeout_seconds) {
 						timersub(&channel_history->timestamps[time_index+1], &channel_history->timestamps[time_index], &delta_tv);
 
-						channel_count ++;
-						channel_sum += delta_tv.tv_sec*1000000 + delta_tv.tv_usec;
+						// Filter out any large values
+						if (delta_tv.tv_sec < buffer_data_timeout_seconds) {
+							channel_count++;
+							channel_sum += delta_tv.tv_sec * 1000000 + delta_tv.tv_usec;
+						}
 					}
 				}
 
@@ -1934,12 +1963,13 @@ void* buffered_frame_thread(void *unused_data)
 			pthread_mutex_unlock(&g_buffered_frame_data.mutex);
 
 			if (overall_count == 0) {
+				//printf("Overall Count Zero!\n");
 				usleep(idle_sleep_us);
 			} else {
 
 				uint64_t sleep_for = overall_sum / overall_count;
 
-				printf("Sleep for: %qu us (%qu fps)\n",sleep_for, 1000000 / sleep_for);
+				//printf("Sleep for: %qu us (%qu fps)\n",sleep_for, 1000000 / sleep_for);
 				usleep(sleep_for < idle_sleep_us ? sleep_for : idle_sleep_us);
 			}
 		} else {
@@ -1962,7 +1992,9 @@ void buffer_next_frame_data(
 	bool is_remote
 ) {
 	pthread_mutex_lock(&g_buffered_frame_data.mutex);
-	gettimeofday(& g_buffered_frame_data.last_manual_buffer_flush, NULL);
+	if (is_remote) {
+		gettimeofday(&g_buffered_frame_data.last_remote_manual_buffer_flush, NULL);
+	}
 
 	// Prevent buffer overruns
 	data_size = min(data_size, g_runtime_state.frame_size * 3);

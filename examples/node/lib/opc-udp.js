@@ -21,7 +21,7 @@ var OpcUdpClient = function(host, port)
 	this.host = host;
 	this.port = port;
 	this.pixelBuffer = null;
-	this.channelCmdBuffer = null;
+	this.channelCmdBuffers = null;
 
 	this.stripCount = null;
 	this.pixelsPerStrip = null;
@@ -60,16 +60,18 @@ OpcUdpClient.prototype.sendAllDataOnChannel0 = function()
 
 OpcUdpClient.prototype.sendChannel = function(channelIndex)
 {
+	var channelCmdBuffer = this.channelCmdBuffers[channelIndex];
+
 	// Channel (1-based)
-	this.channelCmdBuffer.writeUInt8(channelIndex+1, 0);
+	channelCmdBuffer.writeUInt8(channelIndex+1, 0);
 	// Command
-	this.channelCmdBuffer.writeUInt8(0, 1);
+	channelCmdBuffer.writeUInt8(0, 1);
 	// Length
-	this.channelCmdBuffer.writeUInt16BE(this.pixelsPerStrip * 3, 2);
+	channelCmdBuffer.writeUInt16BE(this.pixelsPerStrip * 3, 2);
 
-	this.pixelBuffer.copy(this.channelCmdBuffer, 4, 4 + channelIndex*this.pixelsPerStrip*3, 4 + (channelIndex+1)*this.pixelsPerStrip*3-1);
+	this.pixelBuffer.copy(channelCmdBuffer, 4, 4 + channelIndex*this.pixelsPerStrip*3, 4 + (channelIndex+1)*this.pixelsPerStrip*3-1);
 
-	return this._send(this.channelCmdBuffer);
+	return this._send(channelCmdBuffer);
 };
 
 OpcUdpClient.prototype.sendSyncCh0 = function(channelIndex)
@@ -80,15 +82,13 @@ OpcUdpClient.prototype.sendSyncCh0 = function(channelIndex)
 
 OpcUdpClient.prototype.sendAllChannels = function(disableSync) {
 	var _this = this;
-	var promiseChain = this.sendChannel(0);
 
-	for (var i=1; i<this.stripCount; i++) {
-		(function(boundI){
-			promiseChain = promiseChain.then(function() {
-				return _this.sendChannel(boundI);
-			});
-		})(i);
+	var channelPromises = new Array(this.stripCount);
+	for (var s=0; s<this.stripCount; s++) {
+		channelPromises[s] = this.sendChannel(s);
 	}
+
+	var promiseChain = Q(channelPromises).allSettled();
 
 	if (! disableSync) {
 		promiseChain = promiseChain.then(function(){
@@ -110,8 +110,11 @@ OpcUdpClient.prototype.setPixelCount = function(strips, pixelsPerStrip)
 	}
 
 	var newChannelBufferLength = 4 + strips*pixelsPerStrip*3;
-	if (this.channelCmdBuffer == null || this.channelCmdBuffer.length != newChannelBufferLength) {
-		this.channelCmdBuffer = new Buffer(newChannelBufferLength);
+	if (this.channelCmdBuffers == null || this.channelCmdBuffers.length != strips || (this.channelCmdBuffers.length>0 && this.channelCmdBuffers[0].length != newBufferLength)) {
+		this.channelCmdBuffers = new Array(strips);
+		for (var i=0; i<strips; i++) {
+			this.channelCmdBuffers[i] = new Buffer(newChannelBufferLength);
+		}
 	}
 
 	// Initialize OPC header
