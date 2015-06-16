@@ -287,8 +287,8 @@ static struct
 
 	ledscape_t * leds;
 
-	char pru0_program_filename[4096];
-	char pru1_program_filename[4096];
+	char pru_mode[256];
+	char pru_mapping[256];
 
 	uint32_t red_lookup[257];
 	uint32_t green_lookup[257];
@@ -691,6 +691,10 @@ int main(int argc, char ** argv)
 
 	handle_args(argc, argv);
 
+	// Zero runtime strings
+	g_runtime_state.pru_mapping[0] = 0;
+	g_runtime_state.pru_mode[0] = 0;
+
 	// Validate the configuration
 	if (validate_server_config(
 		& g_server_config,
@@ -736,25 +740,6 @@ int main(int argc, char ** argv)
 	pthread_exit(NULL);
 }
 
-const char* build_pruN_program_name(
-	const char* output_mode_name,
-	const char* output_mapping_name,
-	uint8_t pruNum,
-	char* out_pru_filename,
-	int filename_len
-) {
-	snprintf(
-		out_pru_filename,
-		filename_len,
-		"pru/bin/%s-%s-pru%d.bin",
-		output_mode_name,
-		output_mapping_name,
-		(int) pruNum
-	);
-
-	return out_pru_filename;
-}
-
 void ensure_server_setup() {
 	printf("[main] Initializing / Updating server...");
 
@@ -775,31 +760,12 @@ void ensure_server_setup() {
 	else if (g_runtime_state.leds_per_strip != g_server_config.leds_per_strip) {
 		ledscape_init_needed = true;
 	}
-	else if (g_runtime_state.pru1_program_filename == NULL || g_runtime_state.pru0_program_filename == NULL) {
+	else if (g_runtime_state.pru_mapping == NULL || g_runtime_state.pru_mode == NULL) {
 		ledscape_init_needed = true;
 	}
 	else {
-		char pru0_filename_temp[4096],
-			pru1_filename_temp[4096];
-
-		build_pruN_program_name(
-			g_server_config.output_mode_name,
-			g_server_config.output_mapping_name,
-			0,
-			pru0_filename_temp,
-			sizeof(pru0_filename_temp)
-		);
-
-		build_pruN_program_name(
-			g_server_config.output_mode_name,
-			g_server_config.output_mapping_name,
-			1,
-			pru1_filename_temp,
-			sizeof(pru1_filename_temp)
-		);
-
-		if (strcasecmp(pru0_filename_temp, g_runtime_state.pru0_program_filename) != 0 ||
-			strcasecmp(pru1_filename_temp, g_runtime_state.pru1_program_filename) != 0) {
+		if (strcasecmp(g_server_config.output_mapping_name, g_runtime_state.pru_mapping) != 0 ||
+			strcasecmp(g_server_config.output_mode_name, g_runtime_state.pru_mode) != 0) {
 			ledscape_init_needed = true;
 		}
 	}
@@ -814,23 +780,10 @@ void ensure_server_setup() {
 
 		// Init LEDscape
 		printf("[main] Starting LEDscape...");
-		g_runtime_state.leds = ledscape_init_with_programs(
+		g_runtime_state.leds = ledscape_init_with_mode_mapping(
 			g_server_config.leds_per_strip,
-			build_pruN_program_name(
-				g_server_config.output_mode_name,
-				g_server_config.output_mapping_name,
-				0,
-				g_runtime_state.pru0_program_filename,
-				sizeof(g_runtime_state.pru0_program_filename)
-			),
-
-			build_pruN_program_name(
-				g_server_config.output_mode_name,
-				g_server_config.output_mapping_name,
-				1,
-				g_runtime_state.pru1_program_filename,
-				sizeof(g_runtime_state.pru1_program_filename)
-			)
+			g_server_config.output_mapping_name,
+		    g_server_config.output_mode_name
 		);
 		g_runtime_state.leds_per_strip = g_server_config.leds_per_strip;
 	}

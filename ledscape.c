@@ -89,7 +89,6 @@ ledscape_draw(
 	unsigned int frame
 )
 {
-
 	leds->ws281x_0->pixels_dma = leds->pru0->ddr_addr + leds->frame_size * frame;
 	leds->ws281x_1->pixels_dma = leds->pru0->ddr_addr + leds->frame_size * frame;
 
@@ -105,8 +104,8 @@ ledscape_draw(
 }
 
 
-/** Wait for the current frame to finish transfering to the strips.
- * \returns a token indicating the response code.
+/**
+ * Wait for the current frame to finish transferring to the strips.
  */
 void
 ledscape_wait(
@@ -126,19 +125,37 @@ ledscape_wait(
 	}
 }
 
+const char* build_pruN_program_name(
+	const char* output_mode_name,
+	const char* output_mapping_name,
+	uint8_t pruNum,
+	char* out_pru_filename,
+	int filename_len
+) {
+	snprintf(
+		out_pru_filename,
+		filename_len,
+		"pru/bin/%s-%s-pru%d.bin",
+		output_mode_name,
+		output_mapping_name,
+		(int) pruNum
+	);
+
+	return out_pru_filename;
+}
 
 ledscape_t * ledscape_init( unsigned num_pixels ) {
-	return ledscape_init_with_programs(
+	return ledscape_init_with_mode_mapping(
 		num_pixels,
-		"pru/bin/ws281x-original-ledscape-pru0.bin",
-		"pru/bin/ws281x-original-ledscape-pru1.bin"
+		"original-ledscape",
+		"ws281x"
 	);
 }
 
-ledscape_t * ledscape_init_with_programs(
+ledscape_t *ledscape_init_with_mode_mapping(
 	unsigned num_pixels,
-	const char* pru0_program_filename,
-	const char* pru1_program_filename
+	const char *mapping_name,
+	const char *mode_name
 )
 {
 	pru_t * const pru0 = pru_init(0);
@@ -155,32 +172,39 @@ ledscape_t * ledscape_init_with_programs(
 	ledscape_t * const leds = calloc(1, sizeof(*leds));
 
 	*leds = (ledscape_t) {
-		.pru0		= pru0,
-		.pru1		= pru1,
-		.num_pixels	= num_pixels,
-		.frame_size	= frame_size,
-		.pru0_program_filename  = pru0_program_filename,
-		.pru1_program_filename  = pru1_program_filename,
-		.ws281x_0	= pru0->data_ram,
-		.ws281x_1	= pru1->data_ram
+		.pru0                  = pru0,
+		.pru1                  = pru1,
+		.num_pixels            = num_pixels,
+		.frame_size            = frame_size,
+		.ws281x_0              = pru0->data_ram,
+		.ws281x_1              = pru1->data_ram
 	};
+
+	strlcpy(leds->mapping_name, mapping_name, sizeof(leds->mapping_name));
+	strlcpy(leds->mode_name, mapping_name, sizeof(leds->mode_name));
 
 	*(leds->ws281x_0) = *(leds->ws281x_1) = (ws281x_command_t) {
-		.pixels_dma	= 0, // will be set in draw routine
-		.command	= 0,
-		.response	= 0,
-		.num_pixels	= leds->num_pixels,
+		.pixels_dma = 0, // will be set in draw routine
+		.command    = 0,
+		.response   = 0,
+		.num_pixels = leds->num_pixels,
 	};
 
-	// Configure all of our output pins.
-	for (unsigned i = 0 ; i < ARRAY_COUNT(gpios0) ; i++)
-		pru_gpio(0, gpios0[i], 1, 0);
-	for (unsigned i = 0 ; i < ARRAY_COUNT(gpios1) ; i++)
-		pru_gpio(1, gpios1[i], 1, 0);
-	for (unsigned i = 0 ; i < ARRAY_COUNT(gpios2) ; i++)
-		pru_gpio(2, gpios2[i], 1, 0);
-	for (unsigned i = 0 ; i < ARRAY_COUNT(gpios3) ; i++)
-		pru_gpio(3, gpios3[i], 1, 0);
+	char pru0_program_filename[512];
+	char pru1_program_filename[512];
+
+	build_pruN_program_name(mode_name, mapping_name, 0, pru0_program_filename, sizeof(pru0_program_filename));
+	build_pruN_program_name(mode_name, mapping_name, 1, pru1_program_filename, sizeof(pru1_program_filename));
+
+	// Use node to setup the pins
+	printf("Setting up pins...\n");
+	char* cmd;
+	asprintf(&cmd, "node pru/pinmap.js --mapping %s init-gpio", mapping_name);
+	int ret = system(cmd);
+	if (ret != 0) {
+		printf("Failed to executed %s with error code %d\n", cmd, ret);
+	}
+	free(cmd);
 
 	// Initiate the PRU0 program
 	pru_exec(pru0, pru0_program_filename);
@@ -190,7 +214,6 @@ ledscape_t * ledscape_init_with_programs(
 	fprintf(stdout, "String PRU0 with %s... ", pru0_program_filename);
 	while (!leds->ws281x_0->response);
 	printf("OK\n");
-
 
 	// Initiate the PRU1 program
 	pru_exec(pru1, pru1_program_filename);
@@ -303,7 +326,7 @@ color_channel_order_t color_channel_order_from_string(const char* str) {
 		return COLOR_ORDER_BRG;
 	}
 	else {
-		return -1;
+		return COLOR_ORDER_RGB;
 	}
 }
 

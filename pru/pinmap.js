@@ -1,3 +1,5 @@
+var stripJsonComments = require("strip-json-comments");
+
 var pinData = [
 	{ header: 8, headerPin:  1, gpioNum: 0  , name: "GND"        },
 	{ header: 8, headerPin:  2, gpioNum: 0  , name: "GND"        },
@@ -98,11 +100,20 @@ var pinsByHeaderAndPin = {9:[], 8: []};
 var pinsByGpioNum = {9:[], 8: []};
 var pinsByGpioBankAndBit = {};
 var pinsByPruChannel = {};
+var pinsByName = {};
+var pinsByGpioFullName = {};
+var pinsByHeaderName = {};
 
 pinData.forEach(function(d){
 	d.gpioBank = parseInt(d.gpioNum / 32);
 	d.gpioBit = d.gpioNum % 32;
 	d.gpioName = d.gpioBank + "_" + d.gpioBit;
+	d.gpioFullName = "GPIO" + d.gpioName;
+	d.headerName = "P" + d.header + "_" + d.headerPin;
+
+	pinsByHeaderName[d.headerName] = d;
+	pinsByName[d.name] = d;
+	pinsByGpioFullName[d.gpioFullName] = d;
 
 	pinsByHeaderAndPin[d.header][d.headerPin] = d;
 	pinsByGpioNum[d.gpioNum] = d;
@@ -125,9 +136,10 @@ bitsUsedByBank.forEach(function(usedInBank, bankNum){
 		totalUsedPinCount ++;
 
 		pinsByPruChannel[channelIndex] = pinsByGpioBankAndBit[bankNum][bitNum];
-
 		pinsByGpioBankAndBit[bankNum][bitNum].used = true;
-		pinsByGpioBankAndBit[bankNum][bitNum].channelIndex = channelIndex++;
+		pinsByGpioBankAndBit[bankNum][bitNum].channelIndex = channelIndex;
+
+		channelIndex++;
 	});
 });
 
@@ -283,8 +295,19 @@ var Commands = {
 		printPinTable("Internal Channel Index", function(p){ return p.mappedChannelIndex!=undefined ? p.mappedChannelIndex : "" });
 	},
 
+	"mapping-data": function() {
+		console.info('\t"mappedPinNumberToPinDesignator": {');
+		pinData
+			.filter(function(pin){ return pin.mappedChannelIndex !== undefined })
+			.sort(function(a, b) { return a.mappedChannelIndex - b.mappedChannelIndex})
+			.forEach(function(pin) {
+				console.info('\t\t"' + pin.mappedChannelIndex + '": "' + pin.headerName + '", // GPIO' + pin.gpioName + ', ' + pin.name);
+			}, {});
+		console.info("\t}");
+	},
+
 	"pru-headers": function() {
-		function buildRangeHeader(prefix, startIndexInclusive, endIndexExclusive) {
+		function buildRangeHeader(prefix, pinAccepter) {
 			var output = "";
 
 			var bankData = [];
@@ -305,16 +328,29 @@ var Commands = {
 				};
 			}
 
-			for (var channelIndex=startIndexInclusive, relativeIndex=0; channelIndex<endIndexExclusive; channelIndex++, relativeIndex++) {
-				var pin = pinsByMappedChannelIndex[channelIndex];
-				if (pin) {
-					var usedBitIndexInBank = bankData[pin.gpioBank].usePin(channelIndex, pin.gpioBit);
-					output += "// --- Channel " + channelIndex + " ---\n";
-					output += "#define " + prefix + "gpio" + pin.gpioBank + "_bit" + usedBitIndexInBank + " " + pin.gpioBit + "\n";
-					output += "#define " + prefix + "channel" + relativeIndex + "_bank " + pin.gpioBank + "\n";
-					output += "#define " + prefix + "channel" + relativeIndex + "_bit " + pin.gpioBit + "\n";
-					output += "#define " + prefix + "channel" + relativeIndex + "_usedBit " + usedBitIndexInBank + "\n";
-					output += "\n";
+			var relativeIndex = 0;
+			for (var key in pinsByMappedChannelIndex) {
+				if (pinsByMappedChannelIndex.hasOwnProperty(key)) {
+					var pin = pinsByMappedChannelIndex[key];
+
+					if (pinAccepter(pin)) {
+						var channelIndex = pin.mappedChannelIndex;
+						var usedBitIndexInBank = bankData[pin.gpioBank].usePin(channelIndex, pin.gpioBit);
+
+						output += "// --- Channel " + channelIndex + " ---\n";
+						output += "#define " + prefix + "gpio" + pin.gpioBank + "_bit" + usedBitIndexInBank + " " + pin.gpioBit + "\n";
+						output += "#define " + prefix + "channel" + relativeIndex + "_bank " + pin.gpioBank + "\n";
+						output += "#define " + prefix + "channel" + relativeIndex + "_bit " + pin.gpioBit + "\n";
+						output += "#define " + prefix + "channel" + relativeIndex + "_usedBit " + usedBitIndexInBank + "\n";
+
+						output += "#define " + "pin_" + pin.mappedChannelIndex + "_exists 1\n";
+						output += "#define " + "pin_" + pin.mappedChannelIndex + "_gpio GPIO" + pin.gpioBank + "\n";
+						output += "#define " + "pin_" + pin.mappedChannelIndex + "_mask " + toHexLiteral(1 << pin.gpioBit) + "\n";
+
+						output += "\n";
+
+						relativeIndex ++;
+					}
 				}
 			}
 
@@ -350,14 +386,65 @@ var Commands = {
 		console.info(slashLine);
 
 		console.info(slashLine);
+
 		console.info("// PRU0 Mappings");
-		console.info(buildRangeHeader("pru0_", 0, 24));
+		console.info(buildRangeHeader("pru0_", function(pin){ return pin.mappedChannelIndex < 24; }));
 		console.info(slashLine);
 		console.info("\n\n");
 		console.info(slashLine);
+
 		console.info("// PRU1 Mappings");
-		console.info(buildRangeHeader("pru1_", 24, 48));
+		console.info(buildRangeHeader("pru1_", function(pin){ return pin.mappedChannelIndex >= 24; }));
 		console.info(slashLine);
+
+		console.info("// CTRL Mappings");
+		console.info(buildRangeHeader("ctrl_", function(pin){ return isNaN(pin.mappedChannelIndex); }));
+		console.info(slashLine);
+	},
+
+	"init-gpio": function() {
+		function writeSync(fname, data) {
+			var fd = fs.openSync(fname, "w");
+			fs.writeSync(fd, data);
+			fs.closeSync(fd);
+		}
+
+		var pinResults = [];
+
+		pinData.forEach(function (pin) {
+			if (pin.mappedChannelIndex !== undefined) {
+				//console.info(pin.mappedChannelIndex + ": " + pin.gpioFullName + "("+pin.gpioNum+")");
+
+				var result = pinResults[pin.mappedChannelIndex] = {
+					'export' : false,
+					'direction' : false,
+					'value' : false
+				};
+
+				try {
+					writeSync("/sys/class/gpio/export", pin.gpioNum);
+					result.export = true;
+				} catch (e) { }
+				try {
+					writeSync("/sys/class/gpio/gpio" + pin.gpioNum + "/direction", "out");
+					result.direction = true;
+				} catch (e) { }
+				try {
+					writeSync("/sys/class/gpio/gpio" + pin.gpioNum + "/value", 0);
+					result.value = true;
+				} catch (e) { }
+			}
+		});
+
+		["export", "direction", "value"].forEach(function(opName) {
+			var passed = [];
+			var failed = [];
+			pinResults.forEach(function(pinRes, i){
+				if (! pinRes[opName]) passed.push(i);
+				else failed.push(i);
+			});
+			console.info(opName + "; OK: " + passed.join(", ") + "; FAIL: " + failed.join(", "));
+		});
 	}
 };
 
@@ -410,17 +497,56 @@ if (validPaths.length == 0) {
 	usage("Could not find mapping: " + mappingFilename);
 }
 
-var pinMapping = JSON.parse(fs.readFileSync(validPaths[0], "utf8"));
+var pinMapping;
+try {
+	pinMapping = JSON.parse(stripJsonComments(fs.readFileSync(validPaths[0], "utf8")));
+} catch (e) {
+	console.error(e);
+	throw new Error("Failed to parse " + validPaths[0]);
+}
 
 process.stderr.write("Using mapping: " + pinMapping.name + " from " + mappingFilename + "\n");
+
 if (pinMapping.mappedPinNumberToOriginalPinNumberMap) {
+	var mappedCount = 0;
+
 	for (var i = 0; i<totalUsedPinCount; i++) {
-		var pin = pinsByPruChannel[pinMapping.mappedPinNumberToOriginalPinNumberMap[i]];
-		pinsByMappedChannelIndex[i] = pin;
-		pin.mappedChannelIndex = i;
+		if (pinMapping.mappedPinNumberToOriginalPinNumberMap[i] !== undefined) {
+			var pin = pinsByPruChannel[pinMapping.mappedPinNumberToOriginalPinNumberMap[i]];
+			pinsByMappedChannelIndex[i] = pin;
+			pin.mappedChannelIndex = i;
+			mappedCount ++;
+		}
 	}
 
+	process.stderr.write("Mapped " + mappedCount + " channels\n");
+
 	commandFunc();
-} else {
+}
+
+else if (pinMapping.mappedPinNumberToPinDesignator) {
+	var mappedCount = 0;
+
+	var mappedPinNumberToPinDesignator = pinMapping.mappedPinNumberToPinDesignator;
+
+	for (var i in mappedPinNumberToPinDesignator) if (mappedPinNumberToPinDesignator.hasOwnProperty(i)) {
+		var designator = ("" + pinMapping.mappedPinNumberToPinDesignator[i]).toUpperCase().trim();
+		var pin = pinsByHeaderName[designator] || pinsByName[designator] || pinsByGpioFullName[designator];
+
+		if (pin) {
+			pinsByMappedChannelIndex[i] = pin;
+			pin.mappedChannelIndex = i;
+			mappedCount++;
+		} else {
+			throw new Error("No pin matches designator " + designator + " for pin " + i);
+		}
+	}
+
+	process.stderr.write("Mapped " + mappedCount + " channels\n");
+
+	commandFunc();
+}
+
+else {
 	usage("Invalid mapping file format. No mappedPinNumberToOriginalPinNumberMap field found.");
 }
