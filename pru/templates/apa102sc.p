@@ -231,25 +231,15 @@ l_end_frame:
 	RESET_GPIO_ONES()
 
 	// numleds / 2 bits of 1
-	
+	PREP_GPIO_ADDRS_FOR_SET()
+	PREP_GPIO_MASK_NAMED(all)
+	GPIO_APPLY_MASK_TO_ADDR()
 
 	l_end_bit_loop:
 		DECREMENT r_bit_num
 
-		// Clocks HIGH
-		PREP_GPIO_ADDRS_FOR_SET()
-		PREP_GPIO_MASK_NAMED(odd)
-		GPIO_APPLY_MASK_TO_ADDR()
-	
-		// raise data
-	        PREP_GPIO_ADDRS_FOR_SET()
-        	PREP_GPIO_MASK_NAMED(even)
-	        GPIO_APPLY_MASK_TO_ADDR()
-		
-		// Clocks LOW
-		PREP_GPIO_ADDRS_FOR_CLEAR()
-		PREP_GPIO_MASK_NAMED(odd)
-		GPIO_APPLY_MASK_TO_ADDR()
+		CLOCK_HIGH();
+		CLOCK_LOW();
 
 		QBNE l_end_bit_loop, r_bit_num, #0
 	

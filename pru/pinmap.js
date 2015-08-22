@@ -1,3 +1,4 @@
+var shell = require('shelljs');
 var stripJsonComments = require("strip-json-comments");
 
 var pinData = [
@@ -96,13 +97,15 @@ var pinData = [
 ];
 
 
-var pinsByHeaderAndPin = {9:[], 8: []};
-var pinsByGpioNum = {9:[], 8: []};
-var pinsByGpioBankAndBit = {};
-var pinsByPruChannel = {};
-var pinsByName = {};
-var pinsByGpioFullName = {};
-var pinsByHeaderName = {};
+var pinsByHeaderAndPin       = global.pinsByHeaderAndPin       = {9:[], 8: []};
+var pinsByGpioNum            = global.pinsByGpioNum            = {9:[], 8: []};
+var pinsByGpioBankAndBit     = global.pinsByGpioBankAndBit     = {};
+var pinsByPruChannel         = global.pinsByPruChannel         = {};
+var pinsByName               = global.pinsByName               = {};
+var pinsByGpioFullName       = global.pinsByGpioFullName       = {};
+var pinsByHeaderName         = global.pinsByHeaderName         = {};
+var pinsByMappedChannelIndex = global.pinsByMappedChannelIndex = [];
+var pinsByPruNum             = global.pinsByPruNum             = [];
 
 pinData.forEach(function(d){
 	d.gpioBank = parseInt(d.gpioNum / 32);
@@ -143,7 +146,6 @@ bitsUsedByBank.forEach(function(usedInBank, bankNum){
 	});
 });
 
-var pinsByMappedChannelIndex = [];
 
 var p8verified = [ // p8
 	0,  0, // 1
@@ -445,9 +447,96 @@ var Commands = {
 			});
 			console.info(opName + "; OK: " + passed.join(", ") + "; FAIL: " + failed.join(", "));
 		});
+	},
+
+	"pru-setup": function(options, arguments) {
+		var tempDir = shell.tempdir() + "/ledscape";
+		if (typeof(options.tempDir) === "string") {
+			tempDir = options.tempDir;
+		}
+
+		var modeName = options.mode;
+		if (typeof(modeName) !== "string") {
+			usage("--mode requires an argument");
+		}
+
+		var channelCount = options["channel-count"] | 0;
+		if (!(channelCount > 0 && channelCount <= 48)) {
+			usage("--channel-count must be an integer between 1 and 48")
+		}
+
+		process.stderr.write("tempDir: " + tempDir + "\n");
+		shell.mkdir('-p', tempDir);
+		shell.cp("-f", "./jstemplates/common.p.h", tempDir);
+
+		function buildProgram(pruNum) {
+			var initialFilename = tempDir + "/" + modeName + "-pru" + pruNum + ".p";
+			var result = generatePruProgram(modeName, pruNum, channelCount);
+			result.pruCode.to(initialFilename)
+
+			var processedFilename = tempDir + "/" + modeName + "-pru" + pruNum + ".o.p";
+
+			var gcc = shell.exec("cd `dirname \"" + initialFilename + "\"`; gcc -E - < \"" + initialFilename + "\" | perl -p -e 's/^#.*//; s/;/\\n/g; s/BYTE\((\d+)\)/t\1/g' > " + processedFilename, {silent:true});
+			if (gcc.code !== 0) {
+				console.error("Failed to process with GCC and perl: " + gcc.output);
+				shell.exit(-1);
+			}
+
+			var pasm = shell.exec("../am335x/pasm/pasm -V3 -b " + processedFilename, {silent:true});
+			if (pasm.code !== 0) {
+				console.error("Failed to compile " + processedFilename + ":\n" + pasm.output);
+				shell.exit(-1);
+			}
+
+			return {
+				binFile: processedFilename.replace(/\.p$/, ".bin"),
+				usedPins: result.usedPins
+			}
+		}
+
+		var pru0Result = buildProgram(0);
+		var pru1Result = buildProgram(1);
+
+		var usedPins = pru0Result.usedPins.concat(pru1Result.usedPins);
+
+		usedPins.forEach(function(pin) {
+			if (pin.mappedChannelIndex !== undefined) {
+				process.stderr.write("Pin " + pin.mappedChannelIndex + " (" + pin.headerName + "):");
+
+				try {
+					writeSync("/sys/class/gpio/export", pin.gpioNum);
+					process.stderr.write(" export OK;");
+				} catch (e) {
+					process.stderr.write(" export FAIL;");
+				}
+
+				try {
+					writeSync("/sys/class/gpio/gpio" + pin.gpioNum + "/direction", "out");
+					process.stderr.write(" direction OK;");
+				} catch (e) {
+					process.stderr.write(" direction FAIL;");
+				}
+
+				try {
+					writeSync("/sys/class/gpio/gpio" + pin.gpioNum + "/value", 0);
+					process.stderr.write(" value OK;");
+				} catch (e) {
+					process.stderr.write(" value FAIL;");
+				}
+
+				process.stderr.write("\n");
+			}
+		});
+
+		console.info(pru0Result.binFile);
+		console.info(pru1Result.binFile);
 	}
 };
 
+function generatePruProgram(modeName, pruNum) {
+	var template = require("./jstemplates/" + modeName);
+	return template("./jstemplates/", pruNum, 24);
+}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Bootstrap
@@ -463,23 +552,54 @@ function usage(error) {
 }
 
 var commandFunc = Commands.pinout;
+var optionMap = {};
+var lastOptName = null;
+var parsedArgs = [];
+
 process.argv.forEach(function(arg, i) {
+	function parseArg(a) {
+		if (a === "true") return true;
+		if (a === "false") return false;
+		if (a === "null") return null;
+		if (!isNaN(a)) return 1 * a;
+		return a;
+	}
+
 	if (arg === "-h" || arg === "-?") {
 		usage();
 	}
 
-	if (arg === "--mapping") {
-		if (process.argv.length > i+1) {
-			mappingFilename = process.argv[i + 1];
-		} else {
-			usage(arg + " requires an argument");
-		}
-	}
-
-	if (arg in Commands) {
+	else if (arg in Commands) {
 		commandFunc = Commands[arg];
 	}
+
+	else if (arg.substring(0, 2) == "--") {
+		lastOptName = arg.substring(2);
+		optionMap[lastOptName] = true;
+	}
+
+	else if (arg.substring(0, 1) == "-") {
+		lastOptName = arg.substring(1);
+		optionMap[lastOptName] = true;
+	}
+
+	else {
+		if (lastOptName !== null) {
+			optionMap[lastOptName] = parseArg(arg);
+		} else {
+			parsedArgs.push(parseArg(arg));
+		}
+		lastOptName = null;
+	}
 });
+
+if ("mapping" in optionMap) {
+	if (optionMap.mapping === true) {
+		usage("--mapping requires an argument");
+	} else {
+		mappingFilename = optionMap.mapping;
+	}
+}
 
 var fs = require('fs');
 var path = require('path');
@@ -502,29 +622,23 @@ try {
 	pinMapping = JSON.parse(stripJsonComments(fs.readFileSync(validPaths[0], "utf8")));
 } catch (e) {
 	console.error(e);
-	throw new Error("Failed to parse " + validPaths[0]);
+	usage("Failed to parse mapping at " + validPaths[0] + "\n");
 }
 
-process.stderr.write("Using mapping: " + pinMapping.name + " from " + mappingFilename + "\n");
+process.stderr.write("Mapping: " + mappingFilename + " (" + pinMapping.name + ")\n");
 
-if (pinMapping.mappedPinNumberToOriginalPinNumberMap) {
-	var mappedCount = 0;
-
-	for (var i = 0; i<totalUsedPinCount; i++) {
-		if (pinMapping.mappedPinNumberToOriginalPinNumberMap[i] !== undefined) {
-			var pin = pinsByPruChannel[pinMapping.mappedPinNumberToOriginalPinNumberMap[i]];
-			pinsByMappedChannelIndex[i] = pin;
-			pin.mappedChannelIndex = i;
-			mappedCount ++;
-		}
-	}
-
-	process.stderr.write("Mapped " + mappedCount + " channels\n");
-
-	commandFunc();
+function mapPinToChannel(
+	pin,
+  channel
+) {
+	pinsByMappedChannelIndex[channel] = pin;
+	pin.mappedChannelIndex = channel;
+	pin.pruIndex = channel < 24 ? 0 : 1;
+	pin.pruChannel = channel % 24;
+	(pinsByPruNum[pin.pruIndex] = pinsByPruNum[pin.pruIndex]||[])[pin.pruChannel] = pin;
 }
 
-else if (pinMapping.mappedPinNumberToPinDesignator) {
+if (pinMapping.mappedPinNumberToPinDesignator) {
 	var mappedCount = 0;
 
 	var mappedPinNumberToPinDesignator = pinMapping.mappedPinNumberToPinDesignator;
@@ -534,19 +648,18 @@ else if (pinMapping.mappedPinNumberToPinDesignator) {
 		var pin = pinsByHeaderName[designator] || pinsByName[designator] || pinsByGpioFullName[designator];
 
 		if (pin) {
-			pinsByMappedChannelIndex[i] = pin;
-			pin.mappedChannelIndex = i;
+			mapPinToChannel(pin, i);
 			mappedCount++;
 		} else {
 			throw new Error("No pin matches designator " + designator + " for pin " + i);
 		}
 	}
 
-	process.stderr.write("Mapped " + mappedCount + " channels\n");
+	process.stderr.write("channelCount:  " + mappedCount + "\n");
 
-	commandFunc();
+	commandFunc.call(this, optionMap, parsedArgs);
 }
 
 else {
-	usage("Invalid mapping file format. No mappedPinNumberToOriginalPinNumberMap field found.");
+	usage("Invalid mapping file format. No mappedPinNumberToPinDesignator field found.");
 }

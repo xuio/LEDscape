@@ -7,6 +7,7 @@
 		{ "org": "rgb-123", "id": "RGBCape24A" },
 		{ "org": "rgb-123", "id": "RGBCape48A" }
 	],
+	"pinReductionMode": "sequential",
 	"mappedPinNumberToPinDesignator": {
 	  "0": "P9_22", // GPIO0_2, UART2_RXD
 	  "1": "P9_21", // GPIO0_3, UART2_TXD
