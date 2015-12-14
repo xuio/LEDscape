@@ -1,5 +1,8 @@
 #define AM33XX
 
+.origin 0
+.entrypoint START
+
 // ***************************************
 // *     Global Register Assignments     *
 // ***************************************
@@ -64,6 +67,16 @@
 #define PRU1_ARM_INTERRUPT      20
 #define ARM_PRU0_INTERRUPT      21
 #define ARM_PRU1_INTERRUPT      22
+
+#ifdef PRU0
+	#define PRU_CONTROL_ADDRESS 0x22000
+	#define PRU_ARM_INTERRUPT PRU0_ARM_INTERRUPT
+#endif
+
+#ifdef PRU1
+	#define PRU_CONTROL_ADDRESS 0x24000
+	#define PRU_ARM_INTERRUPT PRU1_ARM_INTERRUPT
+#endif
 
 #define CONST_PRUDRAM   C24
 #define CONST_SHAREDRAM C28
@@ -134,17 +147,6 @@
 .endm
 
 
-#if PRU_NUM == 0
-	#define PRU_CONTROL_ADDRESS 0x22000
-	#define PRU_ARM_INTERRUPT PRU0_ARM_INTERRUPT
-#elif PRU_NUM == 1
-	#define PRU_CONTROL_ADDRESS 0x24000
-	#define PRU_ARM_INTERRUPT PRU1_ARM_INTERRUPT
-#else
-	#error Invalid #PRU_NUM: PRU_NUM; must be 0 or 1
-#endif
-
-
 #define sp r0
 #define lr r23
 #define STACK_TOP       (0x2000 - 4)
@@ -179,11 +181,11 @@
 .endm
 
 
-/** Sleep a given number of nanoseconds with 10 ns resolution.
- *
- * This busy waits for a given number of cycles.  Not for use
- * with things that must happen on a tight schedule.
- */
+// Sleep a given number of nanoseconds with 10 ns resolution.
+//
+// This busy waits for a given number of cycles.  Not for use
+// with things that must happen on a tight schedule.
+//
 .macro SLEEPNS
 .mparam ns,inst,lab
 	MOV r_sleep_counter, (ns/10)-1-inst // ws2811 -- high speed
@@ -193,7 +195,7 @@ lab:
 .endm
 
 
-/** Wait for the cycle counter to reach a given value */
+// Wait for the cycle counter to reach a given value
 .macro WAITNS
 .mparam ns,lab
 	MOV r_temp_addr, PRU_CONTROL_ADDRESS // control register
@@ -208,7 +210,7 @@ lab:
 	QBGT lab, r_temp1, r_temp2
 .endm
 
-/** Used after WAITNS to jump to a label if too much time has elapsed */
+// Used after WAITNS to jump to a label if too much time has elapsed
 .macro WAIT_TIMEOUT
 .mparam timeoutNs, timeoutLabel
     // Check that we haven't waited too long (waiting for memory, etc...) and if we have, jump to a timeout label
@@ -216,7 +218,7 @@ lab:
     QBGT timeoutLabel, r_temp2, r_temp1
 .endm
 
-/** Reset the cycle counter */
+// Reset the cycle counter
 .macro RESET_COUNTER
 		// Disable the counter and clear it, then re-enable it
 		MOV r_temp_addr, PRU_CONTROL_ADDRESS // control register
@@ -235,7 +237,7 @@ lab:
 		// LBBO r_sleep_counter, r_temp_addr, 0xC, 4
 .endm
 
-/* Send an interrupt to the ARM*/
+// Send an interrupt to the ARM
 .macro RAISE_ARM_INTERRUPT
 	#ifdef AM33XX
 		MOV R31.b0, PRU_ARM_INTERRUPT+16
@@ -248,14 +250,14 @@ lab:
 // *    Global Structure Definitions     *
 // ***************************************
 
-/** Mappings of the GPIO devices */
+// Mappings of the GPIO devices
 #define GPIO0 0x44E07000
 #define GPIO1 0x4804c000
 #define GPIO2 0x481AC000
 #define GPIO3 0x481AE000
 
-/** Offsets for the clear and set registers in the devices */
+// Offsets for the clear and set registers in the devices
 #define GPIO_CLEARDATAOUT 0x190
 #define GPIO_SETDATAOUT 0x194
 
-#define NOP       mov r0, r0
+// #define NOP       mov r0, r0

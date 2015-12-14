@@ -10,7 +10,7 @@ LEDSCAPE_LIB := libledscape.a
 PRU_TEMPLATES := $(wildcard pru/templates/*.p)
 EXPANDED_PRU_TEMPLATES := $(addprefix pru/generated/, $(notdir $(PRU_TEMPLATES:.p=.template)))
 
-all: $(TARGETS) all_pru_templates ledscape.service
+all: $(TARGETS) ledscape.service
 
 ifeq ($(shell uname -m),armv7l)
 # We are on the BeagleBone Black itself;

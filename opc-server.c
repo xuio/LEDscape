@@ -781,6 +781,7 @@ void ensure_server_setup() {
 		// Init LEDscape
 		printf("[main] Starting LEDscape...");
 		g_runtime_state.leds = ledscape_init_with_mode_mapping(
+			g_server_config.used_strip_count,
 			g_server_config.leds_per_strip,
 			g_server_config.output_mapping_name,
 		    g_server_config.output_mode_name
@@ -861,25 +862,25 @@ int validate_server_config(
 		}
 	}
 
-	{ // outputMode and outputMapping
-		for (int pruNum=0; pruNum < 2; pruNum++) {
-			build_pruN_program_name(
-				input_config->output_mode_name,
-				input_config->output_mapping_name,
-				pruNum,
-				path_temp,
-				sizeof(path_temp)
-			);
-
-			if( access( path_temp, R_OK ) == -1 ) {
-				add_error(
-					"\n\t\t\"" "Invalid mapping and/or mode name; cannot access PRU %d program '%s'" "\",",
-					pruNum,
-					path_temp
-				);
-			}
-		}
-	}
+//	{ // outputMode and outputMapping
+//		for (int pruNum=0; pruNum < 2; pruNum++) {
+//			build_pruN_program_name(
+//				input_config->output_mode_name,
+//				input_config->output_mapping_name,
+//				pruNum,
+//				path_temp,
+//				sizeof(path_temp)
+//			);
+//
+//			if( access( path_temp, R_OK ) == -1 ) {
+//				add_error(
+//					"\n\t\t\"" "Invalid mapping and/or mode name; cannot access PRU %d program '%s'" "\",",
+//					pruNum,
+//					path_temp
+//				);
+//			}
+//		}
+//	}
 
 	// demoMode
 	assert_enum_valid("Demo Mode", input_config->demo_mode);

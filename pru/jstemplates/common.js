@@ -2,8 +2,9 @@ if (typeof PRU_NUM === "undefined") throw new Error("PRU_NUM must be defined");
 if (typeof pruPins === "undefined") throw new Error("pruPins must be defined");
 
 var rawPruCode = "";
+var pruWhitespace = [];
 
-function emitLine(s) { rawPruCode += (s === undefined ? "" : s) + "\n"; };
+function emitLine(s) { rawPruCode += (s === undefined ? "" : (pruWhitespace.join("") + s)) + "\n"; }
 var labelCounter = 0;
 function emitLabel(s, skipNewLine) {
 	if (!s) {
@@ -14,6 +15,15 @@ function emitLabel(s, skipNewLine) {
 	}
 	emitLine(s + ":");
 	return s;
+}
+
+function pruBlock(code) {
+	pruWhitespace.push("  ");
+	try {
+		return code();
+	} finally {
+		pruWhitespace.pop();
+	}
 }
 
 
@@ -36,7 +46,6 @@ function emitInstr(name, args) {
 }
 
 function emitComment(s) {
-	emitLine();
 	emitLine("// " + s);
 }
 
@@ -193,11 +202,13 @@ var r_gpio0_zeros   = r2;
 var r_gpio1_zeros   = r3;
 var r_gpio2_zeros   = r4;
 var r_gpio3_zeros   = r5;
+var r_gpioN_zeros    = [r_gpio0_zeros, r_gpio1_zeros, r_gpio2_zeros, r_gpio3_zeros];
 
 var r_gpio0_ones    = r2;
 var r_gpio1_ones    = r3;
 var r_gpio2_ones    = r4;
 var r_gpio3_ones    = r5;
+var r_gpioN_ones    = [r_gpio0_ones, r_gpio1_ones, r_gpio2_ones, r_gpio3_ones];
 
 var r_data0         = r10;
 var r_data1         = r11;
@@ -274,33 +285,35 @@ var PRU_ARM_INTERRUPT = PRU_NUM === 0 ? PRU0_ARM_INTERRUPT : PRU1_ARM_INTERRUPT;
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 function INIT_PRU() {
-	emitLine("#define PRU_NUM " + PRU_NUM);
+	emitLine("#define PRU" + PRU_NUM);
 	emitLine('#include "common.p.h"');
 	emitComment("Intialize the PRU");
 
-	// Enable OCP master port
-	// clear the STANDBY_INIT bit in the SYSCFG register,
-	// otherwise the PRU will not be able to write outside the
-	// PRU memory space and to the BeagleBon's pins.
+	emitLine("START:");
+
+	emitComment('Enable OCP master port');
+	emitComment('clear the STANDBY_INIT bit in the SYSCFG register,');
+	emitComment('otherwise the PRU will not be able to write outside the');
+	emitComment('PRU memory space and to the BeagleBone\'s pins.');
 	LBCO(r0, C4, 4, 4);
 	CLR(r0, r0, 4);
 	SBCO(r0, C4, 4, 4);
 
-	// Configure the programmable pointer register for PRU0 by setting
-	// c28_pointer[15:0] field to 0x0120.  This will make C28 point to
-	// 0x00012000 (PRU shared RAM).
+	emitComment('Configure the programmable pointer register for PRU0 by setting');
+	emitComment('c28_pointer[15:0] field to 0x0120.  This will make C28 point to');
+	emitComment('0x00012000 (PRU shared RAM).');
 	MOV(r0, '0x00000120');
 	MOV(r1, CTPPR_0);
 	ST32(r0, r1);
 
-	// Configure the programmable pointer register for PRU0 by setting
-	// c31_pointer[15:0] field to 0x0010.  This will make C31 point to
-	// 0x80001000 (DDR memory).
+	emitComment('Configure the programmable pointer register for PRU0 by setting');
+	emitComment('c31_pointer[15:0] field to 0x0010.  This will make C31 point to');
+	emitComment('0x80001000 (DDR memory).');
 	MOV(r0, '0x00100000');
 	MOV(r1, CTPPR_1);
 	ST32(r0, r1);
 
-	// Write a 0x1 into the response field so that they know we have started
+	emitComment('Write a 0x1 into the response field so that they know we have started');
 	MOV(r2, 1);
 	SBCO(r2, CONST_PRUDRAM, 12, 4);
 	MOV(r20, '0xFFFFFFFF');
@@ -393,11 +406,11 @@ function RESET_GPIO_ONES() {
 function TEST_BIT_ZERO(regN, channelIndex) {
 	var label_name = "channel_" + channelIndex + "_zero_skip";
 	var pin = pruPins[channelIndex];
-	var zeros_register = "r_gpio" + pin.gpioBank + "_zeros";
+	var zeros_register = r_gpioN_zeros[ pin.gpioBank];
 
-	emitComment("Test if pin (pruChannel=" + pin.pruChannel + ",global="+pin.mappedChannelIndex+") is ZERO and store in GPIO zero register");
+	emitComment("Test if pin (pruChannel=" + pin.pruChannel + ",global="+pin.mappedChannelIndex+") is ZERO and SET bit " + pin.gpioBit + " in GPIO" + pin.gpioBank + " register");
 	QBBS(label_name, regN, r_bit_num);
-	SET(zeros_register, zeros_register, channelIndex);
+	SET(zeros_register, zeros_register, pin.gpioBit);
 	emitLabel(label_name, true);
 }
 
@@ -411,11 +424,11 @@ function TEST_BIT_ZERO(regN, channelIndex) {
 function TEST_BIT_ONE(regN, channelIndex) {
 	var label_name = "channel_" + channelIndex + "_one_skip";
 	var pin = pruPins[channelIndex];
-	var ones_register = "r_gpio" + pin.gpioBank+"_ones";
+	var ones_register = r_gpioN_ones[ pin.gpioBank];
 
-	emitComment("Test if pin (pruChannel=" + pin.pruChannel + ",global="+pin.mappedChannelIndex+") is ONE and store in GPIO zero register");
+	emitComment("Test if pin (pruChannel=" + pin.pruChannel + ",global="+pin.mappedChannelIndex+") is ONE and SET bit " + pin.gpioBit + " in GPIO" + pin.gpioBank + " register");
 	QBBC(label_name, regN, r_bit_num);
-	SET(ones_register, ones_register, channelIndex);
+	SET(ones_register, ones_register, pin.gpioBit);
 	emitLabel(label_name, true);
 }
 
@@ -450,6 +463,6 @@ function PREP_GPIO_MASK_FOR_PINS(pins) {
 	});
 
 	masks.forEach(function(mask, bankIndex) {
-		MOV(gpio_masks[bankIndex], toHexLiteral(masks[0]));
+		MOV(gpio_masks[bankIndex], toHexLiteral(mask));
 	});
 }

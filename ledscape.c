@@ -44,6 +44,8 @@ static const uint8_t gpios3[] = {
 
 #define ARRAY_COUNT(a) ((sizeof(a) / sizeof(*a)))
 
+#define PRU_TMP_DIR "/tmp/pru"
+
 
 /** Command structure shared with the PRU.
  *
@@ -135,7 +137,8 @@ const char* build_pruN_program_name(
 	snprintf(
 		out_pru_filename,
 		filename_len,
-		"pru/bin/%s-%s-pru%d.bin",
+		"%s/%s-%s-pru%d.bin",
+		PRU_TMP_DIR,
 		output_mode_name,
 		output_mapping_name,
 		(int) pruNum
@@ -146,6 +149,7 @@ const char* build_pruN_program_name(
 
 ledscape_t * ledscape_init( unsigned num_pixels ) {
 	return ledscape_init_with_mode_mapping(
+		48,
 		num_pixels,
 		"original-ledscape",
 		"ws281x"
@@ -153,6 +157,7 @@ ledscape_t * ledscape_init( unsigned num_pixels ) {
 }
 
 ledscape_t *ledscape_init_with_mode_mapping(
+	unsigned num_channels,
 	unsigned num_pixels,
 	const char *mapping_name,
 	const char *mode_name
@@ -199,7 +204,7 @@ ledscape_t *ledscape_init_with_mode_mapping(
 	// Use node to setup the pins
 	printf("Setting up pins...\n");
 	char* cmd;
-	asprintf(&cmd, "node pru/pinmap.js --mapping %s init-gpio", mapping_name);
+	asprintf(&cmd, "node pru/pinmap.js pru-setup --mapping %s --mode %s --tempDir %s --channel-count %d", mapping_name, mode_name, PRU_TMP_DIR, num_channels);
 	int ret = system(cmd);
 	if (ret != 0) {
 		printf("Failed to executed %s with error code %d\n", cmd, ret);

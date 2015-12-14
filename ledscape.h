@@ -71,6 +71,7 @@ unsigned num_pixels
 );
 
 extern ledscape_t *ledscape_init_with_mode_mapping(
+	unsigned num_channels,
 	unsigned num_pixels,
 	const char *mapping_name,
 	const char *mode_name

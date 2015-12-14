@@ -1,5 +1,6 @@
 var shell = require('shelljs');
 var stripJsonComments = require("strip-json-comments");
+var XXH = require('xxhashjs');
 
 var pinData = [
 	{ header: 8, headerPin:  1, gpioNum: 0  , name: "GND"        },
@@ -276,6 +277,13 @@ function printPinTable(title, f) {
 	endRow();
 }
 
+function writeSync(fname, data) {
+	var fd = fs.openSync(fname, "w");
+	fs.writeSync(fd, data);
+	fs.closeSync(fd);
+}
+
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Program Commands
 var Commands = {
@@ -405,12 +413,6 @@ var Commands = {
 	},
 
 	"init-gpio": function() {
-		function writeSync(fname, data) {
-			var fd = fs.openSync(fname, "w");
-			fs.writeSync(fd, data);
-			fs.closeSync(fd);
-		}
-
 		var pinResults = [];
 
 		pinData.forEach(function (pin) {
@@ -467,30 +469,36 @@ var Commands = {
 
 		process.stderr.write("tempDir: " + tempDir + "\n");
 		shell.mkdir('-p', tempDir);
-		shell.cp("-f", "./jstemplates/common.p.h", tempDir);
+		shell.cp("-f", __dirname + "/jstemplates/common.p.h", tempDir);
 
 		function buildProgram(pruNum) {
-			var initialFilename = tempDir + "/" + modeName + "-pru" + pruNum + ".p";
-			var result = generatePruProgram(modeName, pruNum, channelCount);
-			result.pruCode.to(initialFilename)
+			var asmGenerationResult = generatePruProgram(modeName, pruNum, channelCount);
 
-			var processedFilename = tempDir + "/" + modeName + "-pru" + pruNum + ".o.p";
+			function pathOf(name) { return tempDir + "/" + name; }
 
-			var gcc = shell.exec("cd `dirname \"" + initialFilename + "\"`; gcc -E - < \"" + initialFilename + "\" | perl -p -e 's/^#.*//; s/;/\\n/g; s/BYTE\((\d+)\)/t\1/g' > " + processedFilename, {silent:true});
-			if (gcc.code !== 0) {
-				console.error("Failed to process with GCC and perl: " + gcc.output);
-				shell.exit(-1);
-			}
+			var programName = modeName + "-" + mappingFilename.match(/.*?([^\/\.]+)(\..+)?/)[1] + "-pru" + pruNum;
+			var asmCodeHash = XXH(asmGenerationResult.pruCode, 0x243F6A88).toString(16);
 
-			var pasm = shell.exec("../am335x/pasm/pasm -V3 -b " + processedFilename, {silent:true});
-			if (pasm.code !== 0) {
-				console.error("Failed to compile " + processedFilename + ":\n" + pasm.output);
-				shell.exit(-1);
+			var asmFileName = programName + ".p";
+			var binFileName = programName + ".bin";
+			var hashFileName = programName + ".xxh";
+
+			if (!shell.test("-e", pathOf(hashFileName)) || shell.cat(pathOf(hashFileName)) != asmCodeHash) {
+				asmCodeHash.to(pathOf(hashFileName));
+
+				asmGenerationResult.pruCode.to(pathOf(asmFileName));
+
+				execOrDie(
+					"Compiling " + pathOf(asmFileName),
+					"cd '" + tempDir + "'; " + __dirname + "/../am335x/pasm/pasm -V3 -b " + asmFileName
+				);
+			} else {
+				console.error("Existing PRU Code Matches hash for " + pathOf(asmFileName));
 			}
 
 			return {
-				binFile: processedFilename.replace(/\.p$/, ".bin"),
-				usedPins: result.usedPins
+				binFile: pathOf(binFileName),
+				usedPins: asmGenerationResult.usedPins
 			}
 		}
 
@@ -499,43 +507,66 @@ var Commands = {
 
 		var usedPins = pru0Result.usedPins.concat(pru1Result.usedPins);
 
-		usedPins.forEach(function(pin) {
-			if (pin.mappedChannelIndex !== undefined) {
-				process.stderr.write("Pin " + pin.mappedChannelIndex + " (" + pin.headerName + "):");
+		if (shell.test("-d", '/sys/class/gpio')) {
+			usedPins.forEach(function (pin) {
+				if (pin.mappedChannelIndex !== undefined) {
+					process.stderr.write("Pin " + pin.mappedChannelIndex + " (" + pin.headerName + "):");
 
-				try {
-					writeSync("/sys/class/gpio/export", pin.gpioNum);
-					process.stderr.write(" export OK;");
-				} catch (e) {
-					process.stderr.write(" export FAIL;");
+					try {
+						writeSync("/sys/class/gpio/export", pin.gpioNum);
+						process.stderr.write("\n  export OK;");
+					} catch (e) {
+						process.stderr.write("\n  export FAIL: echo " + pin.gpioNum + " > /sys/class/gpio/export");
+						process.stderr.write("\n    " + e);
+					}
+
+					try {
+						writeSync("/sys/class/gpio/gpio" + pin.gpioNum + "/direction", "out");
+						process.stderr.write("\n  direction OK;");
+					} catch (e) {
+						process.stderr.write("\n  direction FAIL: echo out > /sys/class/gpio/gpio" + pin.gpioNum + "/direction");
+						process.stderr.write("\n    " + e);
+					}
+
+					try {
+						writeSync("/sys/class/gpio/gpio" + pin.gpioNum + "/value", 0);
+						process.stderr.write("\n  value OK;");
+					} catch (e) {
+						process.stderr.write("\n  value FAIL: echo 0 > /sys/class/gpio/gpio" + pin.gpioNum + "/value");
+						process.stderr.write("\n    " + e);
+					}
+
+					process.stderr.write("\n");
 				}
+			});
+		} else {
+			console.error("No /sys/class/gpio... Skipping pin setup.");
+		}
 
-				try {
-					writeSync("/sys/class/gpio/gpio" + pin.gpioNum + "/direction", "out");
-					process.stderr.write(" direction OK;");
-				} catch (e) {
-					process.stderr.write(" direction FAIL;");
-				}
-
-				try {
-					writeSync("/sys/class/gpio/gpio" + pin.gpioNum + "/value", 0);
-					process.stderr.write(" value OK;");
-				} catch (e) {
-					process.stderr.write(" value FAIL;");
-				}
-
-				process.stderr.write("\n");
-			}
-		});
-
-		console.info(pru0Result.binFile);
-		console.info(pru1Result.binFile);
+		console.info("PRU0:", pru0Result.binFile);
+		console.info("PRU1:", pru1Result.binFile);
 	}
 };
 
-function generatePruProgram(modeName, pruNum) {
+function execOrDie(
+	description,
+	commandStr
+) {
+	var result = shell.exec(commandStr, { silent: true });
+	if (result.code !== 0) {
+		console.error("FAILED: " + description + " (" + result.code + "): " + commandStr);
+		console.error(result.output.split("\n").join("\n  "));
+		shell.exit(-1);
+	}
+	else {
+		console.error("SUCCESS: " + description +": " + commandStr);
+		return result;
+	}
+}
+
+function generatePruProgram(modeName, pruNum, globalChannelCount) {
 	var template = require("./jstemplates/" + modeName);
-	return template("./jstemplates/", pruNum, 24);
+	return template(__dirname + "/jstemplates/", pruNum, globalChannelCount);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
