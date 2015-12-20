@@ -3,11 +3,14 @@ var fs = require('fs');
 module.exports = function(
 	baseDir,
 	PRU_NUM,
-	overallPinCount
+	overallChanelCount
 ) {
 	var rawPruCode = "";
 
-	var overallChanelCount = Math.floor(overallPinCount / 2);
+	// Restrict overall channel count to max data-clock pairs (24)
+	overallChanelCount = Math.min(24, overallChanelCount);
+
+	var overallPinCount = overallChanelCount * 2;
 	var pruPinCount = Math.floor(overallPinCount / 2);
 	var pruChannelCount = Math.floor(pruPinCount / 2);
 
@@ -127,7 +130,7 @@ module.exports = function(
 			});
 
 			// Load all the data.
-			LOAD_CHANNEL_DATA(0, pruChannelCount);
+			LOAD_CHANNEL_DATA(dataPins[0], 0, pruChannelCount);
 
 			// for bit in 24 to 0
 			emitComment("Loop over the 24 bits in a word");

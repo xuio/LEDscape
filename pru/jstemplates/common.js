@@ -28,7 +28,7 @@ function pruBlock(code) {
 
 
 // Generic instructions
-function emitInstr(name, args) {
+function emitInstr(name, args, comment) {
 	var s = name;
 	if (args) {
 		for (var i = 0; i < args.length; i++) {
@@ -42,6 +42,9 @@ function emitInstr(name, args) {
 		}
 	}
 	s += ";";
+	if (comment) {
+		s += " // " + comment;
+	}
 	emitLine(s);
 }
 
@@ -70,8 +73,8 @@ function toHexLiteral(n) {
 }
 
 function ADC(dest, a, b)  { emitInstr("ADC", arguments);  }
-function ADD(dest, a, b)  { emitInstr("ADD", arguments);  }
-function SUB(dest, a, b)  { emitInstr("SUB", arguments);  }
+function ADD(dest, a, b)  { emitInstr("ADD", arguments, dest + " = " + a + " + " + b);  }
+function SUB(dest, a, b)  { emitInstr("SUB", arguments, dest + " = " + a + " - " + b);  }
 function SUC(dest, a, b)  { emitInstr("SUC", arguments);  }
 function RSB()  { emitInstr("RSB", arguments);  }
 function RSC()  { emitInstr("RSC", arguments);  }
@@ -89,8 +92,16 @@ function SCAN() { emitInstr("SCAN", arguments); }
 function LMBD() { emitInstr("LMBD", arguments); }
 function MOV()  { emitInstr("MOV", arguments);  }
 function LDI()  { emitInstr("LDI", arguments);  }
-function LBBO() { emitInstr("LBBO", arguments); }
-function SBBO() { emitInstr("SBBO", arguments); }
+function LBBO(srcReg, addrReg, addrOffset, byteCount) {
+	emitInstr(
+		"LBBO",
+		arguments,
+		(addrOffset == 0 && byteCount == 4)
+			? ("store the value of " + srcReg + " into &" + addrReg)
+			: ("store " + byteCount + " bytes into " + addrReg + " + " + addrOffset + " from registers starting at " + srcReg)
+	);
+}
+function SBBO(destReg, addrReg, addrOffset, byteCount) { emitInstr("SBBO", arguments, "copy " + byteCount + " bytes from " + addrReg + " + " + addrOffset + " into registers starting at " + destReg); }
 function LBCO() { emitInstr("LBCO", arguments); }
 function SBCO() { emitInstr("SBCO", arguments); }
 function LFC()  { emitInstr("LFC", arguments);  }
@@ -110,8 +121,8 @@ function QBLE() { emitInstr("QBLE", arguments); }
 function QBEQ() { emitInstr("QBEQ", arguments); }
 function QBNE() { emitInstr("QBNE", arguments); }
 function QBA()  { emitInstr("QBA", arguments);  }
-function QBBS(label, reg, bit) { emitInstr("QBBS", arguments); }
-function QBBC(label, reg, bit) { emitInstr("QBBC", arguments); }
+function QBBS(label, reg, bit) { emitInstr("QBBS", arguments, "if (" + reg + " & (1 << " + bit + ") != 0) goto " + label); }
+function QBBC(label, reg, bit) { emitInstr("QBBC", arguments, "if (" + reg + " & (1 << " + bit + ") == 0) goto " + label); }
 function WBS()  { emitInstr("WBS", arguments);  }
 function WBC()  { emitInstr("WBC", arguments);  }
 function HALT() { emitInstr("HALT", arguments); }
@@ -120,7 +131,7 @@ function SLP()  { emitInstr("SLP", arguments);  }
 
 function ST32() { emitInstr("ST32", arguments); }
 function NOP() { MOV(r0, r0); }
-function DECREMENT() { emitInstr("DECREMENT", arguments); }
+function DECREMENT(r) { emitInstr("DECREMENT", arguments, r + " --"); }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 var r0  = { toString: function() { return 'r0' }, b0: "r0.b0", b1: "r0.b1", b2: "r0.b2", b3: "r0.b3", w0: "r0.w0", w1: "r0.w1"};
@@ -369,20 +380,23 @@ function TEST_BIT_ONE(pin) {
 	emitLabel(label_name, true);
 }
 
+function shortNameForPin(pin) {
+	return pin.mappedChannelIndex >= 0 ? pin.mappedChannelIndex : pin.gpioFullName;
+}
 
-function LOAD_CHANNEL_DATA(firstChannel, channelCount) {
+function LOAD_CHANNEL_DATA(firstPin, firstChannel, channelCount) {
 	emitComment("Load " + channelCount + " channels of data into data registers");
 
 	LBBO(
 		r_data0,
 		r_data_addr,
-		pruPins[0].mappedChannelIndex*4+firstChannel*4,
+		firstPin.dataChannelIndex*4 + firstChannel*4,
 		channelCount*4
 	);
 }
 
 function PREP_GPIO_MASK_FOR_PINS(pins) {
-	emitComment("Set the GPIO (bank " + pins[0].gpioBank + ") mask register for setting or clearing channels " + pins.map(function(pin){ return pin.mappedChannelIndex; }).join(", "));
+	emitComment("Set the GPIO (bank " + pins[0].gpioBank + ") mask register for setting or clearing channels " + pins.map(shortNameForPin).join(", "));
 
 	var mask = 0;
 	var bank = -1;
@@ -427,9 +441,7 @@ function groupByBank(
 
 
 function PINS_HIGH(pins, pinsLabel) {
-	emitComment((pinsLabel || "") + ' Pins HIGH: ' + pins.map(function (pin) {
-			return pin.gpioFullName
-		}).join(", "));
+	emitComment((pinsLabel || "") + ' Pins HIGH: ' + pins.map(shortNameForPin).join(", "));
 
 	pruBlock(function() {
 		groupByBank(pins, function (pins, gpioBank) {
@@ -441,9 +453,7 @@ function PINS_HIGH(pins, pinsLabel) {
 }
 
 function PINS_LOW(pins, pinsLabel) {
-	emitComment((pinsLabel || "") + ' Pins LOW: ' + pins.map(function (pin) {
-			return pin.gpioFullName
-		}).join(", "));
+	emitComment((pinsLabel || "") + ' Pins LOW: ' + pins.map(shortNameForPin).join(", "));
 
 	pruBlock(function() {
 		groupByBank(pins, function (pins, gpioBank) {
@@ -455,9 +465,7 @@ function PINS_LOW(pins, pinsLabel) {
 }
 
 function PINS_HIGH_LOW(pins, pinsLabel) {
-	emitComment((pinsLabel || "") + ' Pins HIGH-LOW pulse: ' + pins.map(function (pin) {
-			return pin.gpioFullName
-		}).join(", "));
+	emitComment((pinsLabel || "") + ' Pins HIGH-LOW pulse: ' + pins.map(shortNameForPin).join(", "));
 
 	pruBlock(function() {
 		groupByBank(pins, function (pins, gpioBank) {

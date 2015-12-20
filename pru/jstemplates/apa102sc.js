@@ -174,7 +174,7 @@ module.exports = function(
 			});
 
 			// Load all the data.
-			LOAD_CHANNEL_DATA(0, pruChannelCount);
+			LOAD_CHANNEL_DATA(pruPins[0], 0, pruChannelCount);
 
 			// for bit in 24 to 0
 			emitComment("Loop over the 24 bits in a word");
