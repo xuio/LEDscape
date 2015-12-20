@@ -1,0 +1,17 @@
+{
+  "name": "ledscape-pru-helper",
+  "version": "1.0.0",
+  "description": "Utility for dynamically building PRU programs for use with LEDscape",
+  "main": "pinmap.js",
+  "dependencies": {
+    "shelljs": "^0.5.3",
+    "strip-json-comments": "^2.0.0",
+    "xxhashjs": "^0.1.1"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Yona Appletree (hypher@gmail.com)",
+  "license": "MIT"
+}

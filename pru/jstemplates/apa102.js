@@ -3,19 +3,18 @@ var fs = require('fs');
 module.exports = function(
 	baseDir,
 	PRU_NUM,
-	overallChannelCount
+	overallPinCount
 ) {
 	var rawPruCode = "";
 
-	var clockPin = global.pinsByMappedChannelIndex["clock" + PRU_NUM];
-	if (! clockPin) throw new Error("Cannot determine clock pin for " + PRU_NUM);
+	var overallChanelCount = Math.floor(overallPinCount / 2);
+	var pruPinCount = Math.floor(overallPinCount / 2);
+	var pruChannelCount = Math.floor(pruPinCount / 2);
 
-	var pruChannelCount = Math.ceil(overallChannelCount/2);
+	applyInterlacedClockPinMapping(pruPinCount);
 
-	// Split the used pins between the PRUs, because we have a shared clock line.
-	applyPerPruClockMapping(pruChannelCount);
-
-	var pruPins = global.pinsByPruNum[PRU_NUM].filter(function(_,i){ return i < pruChannelCount; });
+	var clockPins = global.pinsByPruNum[PRU_NUM].filter(function(pin){ return pin.clockChannelIndex >= 0; });
+	var dataPins = global.pinsByPruNum[PRU_NUM].filter(function(pin){ return pin.dataChannelIndex >= 0; });
 
 	// Pull in the common code.
 	eval(fs.readFileSync(baseDir + '/common.js').toString());
@@ -23,75 +22,29 @@ module.exports = function(
 	console.error("Using " + pruChannelCount + " channels on PRU" + PRU_NUM);
 
 	emitComment("//////////////////////////////////////////////////////////////////////////////////////////////////////");
-	emitComment("APA102 Shared Clock for PRU" + PRU_NUM);
-	emitComment("Overall Channels: " + overallChannelCount);
-	emitComment("PRU Channels: " + pruChannelCount);
-	emitComment("Clock Pin: " + clockPin.name);
+	emitComment("APA102 Interlaced Clock for PRU" + PRU_NUM);
+	emitComment("Overall Pins Used: " + overallPinCount + " (" + overallChanelCount + " channels)");
+	emitComment("PRU Pins Used: " + pruPinCount + " (" + pruChannelCount + " channels)");
 	emitComment("//////////////////////////////////////////////////////////////////////////////////////////////////////");
 
 	function DATAS_HIGH(pins) {
-		if (pins) {
-			emitComment('Bank ' + pins[0].gpioBank + ' Data Lines HIGH');
-		} else {
-			emitComment('All Data Lines HIGH');
-		}
-
-		pruBlock(function(){
-			groupByBank(pins || pruPins, function(pins, gpioBank){
-				PREP_GPIO_FOR_SET(gpioBank);
-				PREP_GPIO_MASK_FOR_PINS(pins);
-				APPLY_GPIO_CHANGES();
-			});
-		});
+		PINS_HIGH(pins || dataPins, (pins?"":"All ")+"Data");
 	}
 
 	function DATAS_LOW(pins) {
-		if (pins) {
-			emitComment('Bank ' + pins[0].gpioBank + ' Data Lines LOW');
-		} else {
-			emitComment('All Data Lines LOW');
-		}
-
-		pruBlock(function() {
-			groupByBank(pins || pruPins, function (pins, gpioBank) {
-				PREP_GPIO_FOR_CLEAR(gpioBank);
-				PREP_GPIO_MASK_FOR_PINS(pins);
-				APPLY_GPIO_CHANGES();
-			});
-		});
+		PINS_LOW(pins || dataPins, (pins?"":"All ")+"Data");
 	}
 
-	function CLOCK_HIGH() {
-		emitComment("Bring Clock High");
-
-		pruBlock(function() {
-			PREP_GPIO_FOR_SET(clockPin.gpioBank);
-			PREP_GPIO_MASK_FOR_PINS([clockPin]);
-			APPLY_GPIO_CHANGES();
-		});
+	function CLOCKS_HIGH(pins) {
+		PINS_HIGH(pins || clockPins, (pins?"":"All ")+"Clock");
 	}
 
-	function CLOCK_LOW() {
-		emitComment("Bring Clock Low");
-
-		pruBlock(function() {
-			PREP_GPIO_FOR_CLEAR(clockPin.gpioBank);
-			PREP_GPIO_MASK_FOR_PINS([clockPin]);
-			APPLY_GPIO_CHANGES();
-		});
+	function CLOCKS_LOW(pins) {
+		PINS_LOW(pins || clockPins, (pins?"":"All ")+"Clock");
 	}
 
-	function CLOCK_PULSE() {
-		emitComment("Pulse Clock HIGH-LOW");
-
-		pruBlock(function() {
-			PREP_GPIO_FOR_SET(clockPin.gpioBank);
-			PREP_GPIO_MASK_FOR_PINS([clockPin]);
-			APPLY_GPIO_CHANGES();
-
-			PREP_GPIO_FOR_CLEAR(clockPin.gpioBank);
-			APPLY_GPIO_CHANGES();
-		});
+	function CLOCKS_PULSE(pins) {
+		PINS_HIGH_LOW(pins || clockPins, (pins?"":"All ")+"Clock");
 	}
 
 
@@ -150,7 +103,7 @@ module.exports = function(
 			emitLabel(l_start_bit_loop);
 			emitInstr("DECREMENT", [r_bit_num]);
 
-			CLOCK_PULSE();
+			CLOCKS_PULSE();
 
 			QBNE(l_start_bit_loop, r_bit_num, 0);
 		});
@@ -168,7 +121,7 @@ module.exports = function(
 				var l_header_bit_loop = emitLabel("l_header_bit_loop");
 				DECREMENT(r_bit_num);
 
-				CLOCK_PULSE();
+				CLOCKS_PULSE();
 
 				QBNE(l_header_bit_loop, r_bit_num, 0);
 			});
@@ -185,10 +138,10 @@ module.exports = function(
 				emitLabel(l_bit_loop);
 				DECREMENT(r_bit_num);
 
-				// Send the previous bits (including the last 1 bit for the 8-bit preamble)
-				CLOCK_HIGH();
+				// Send the previous bits (starting with the last 1 bit for the 8-bit preamble)
+				CLOCKS_HIGH();
 
-				groupByBank(pruPins, function(pins, gpioBank) {
+				groupByBank(dataPins, function(pins, gpioBank) {
 					// Bring all data low for this bank
 					DATAS_LOW(pins);
 
@@ -206,13 +159,13 @@ module.exports = function(
 				});
 
 				// Clock LOW
-				CLOCK_LOW();
+				CLOCKS_LOW();
 
 				QBNE(l_bit_loop, r_bit_num, 0);
 			});
 
 			// Clock pulse for final bit
-			CLOCK_PULSE();
+			CLOCKS_PULSE();
 
 			// The RGB streams have been clocked out
 			// Move to the next pixel on each row
@@ -242,7 +195,7 @@ module.exports = function(
 				var l_end_bit_loop = emitLabel("l_end_bit_loop");
 				DECREMENT(r_bit_num);
 
-				CLOCK_PULSE();
+				CLOCKS_PULSE();
 
 				QBNE(l_end_bit_loop, r_bit_num, 0);
 			});
@@ -274,6 +227,6 @@ module.exports = function(
 
 	return {
 		pruCode: rawPruCode,
-		usedPins: pruPins.concat([ clockPin ])
+		usedPins: pruPins
 	}
 };

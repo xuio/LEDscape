@@ -10,49 +10,12 @@
 #define r_data_addr r0
 #define r_data_len r1
 
-#define r_bit_num r6
-#define r_sleep_counter r7
-#define r_temp_addr r8
-#define r_temp1 r9
+#define r_bit_num       r2.w0
+#define r_sleep_counter r2.w1
+#define r_temp_addr r3
+#define r_temp1 r4.w0
+#define r_temp2 r4.w1
 
-#define r_gpio0_zeros r2
-#define r_gpio1_zeros r3
-#define r_gpio2_zeros r4
-#define r_gpio3_zeros r5
-
-#define r_gpio0_ones r2
-#define r_gpio1_ones r3
-#define r_gpio2_ones r4
-#define r_gpio3_ones r5
-
-#define r_data0 r10
-#define r_data1 r11
-#define r_data2 r12
-#define r_data3 r13
-#define r_data4 r14
-#define r_data5 r15
-#define r_data6 r16
-#define r_data7 r17
-#define r_data8 r18
-#define r_data9 r19
-#define r_data10 r20
-#define r_data11 r21
-#define r_data12 r22
-#define r_data13 r23
-#define r_data14 r24
-#define r_data15 r25
-
-#define r_gpio0_mask r20
-#define r_gpio1_mask r21
-#define r_gpio2_mask r22
-#define r_gpio3_mask r23
-
-#define r_gpio0_addr r24
-#define r_gpio1_addr r25
-#define r_gpio2_addr r26
-#define r_gpio3_addr r27
-
-#define r_temp2 r28
 
 // ***************************************
 // *      Global Macro definitions       *
