@@ -81,16 +81,22 @@ module.exports = function(
 		});
 	}
 
-	function CLOCK_PULSE() {
+	function CLOCK_PULSE(delay) {
 		emitComment("Pulse Clock HIGH-LOW");
+
+		var reps = Math.ceil(delay/2) || 1;
 
 		pruBlock(function() {
 			PREP_GPIO_FOR_SET(clockPin.gpioBank);
 			PREP_GPIO_MASK_FOR_PINS([clockPin]);
-			APPLY_GPIO_CHANGES();
+			for (var i=0; i<reps; i++) {
+				APPLY_GPIO_CHANGES();
+			}
 
 			PREP_GPIO_FOR_CLEAR(clockPin.gpioBank);
-			APPLY_GPIO_CHANGES();
+			for (var i=0; i<reps; i++) {
+				APPLY_GPIO_CHANGES();
+			}
 		});
 	}
 
@@ -150,7 +156,7 @@ module.exports = function(
 			emitLabel(l_start_bit_loop);
 			emitInstr("DECREMENT", [r_bit_num]);
 
-			CLOCK_PULSE();
+			CLOCK_PULSE(5);
 
 			QBNE(l_start_bit_loop, r_bit_num, 0);
 		});
@@ -168,7 +174,7 @@ module.exports = function(
 				var l_header_bit_loop = emitLabel("l_header_bit_loop");
 				DECREMENT(r_bit_num);
 
-				CLOCK_PULSE();
+				CLOCK_PULSE(5);
 
 				QBNE(l_header_bit_loop, r_bit_num, 0);
 			});
@@ -188,7 +194,7 @@ module.exports = function(
 				// Send the previous bits (including the last 1 bit for the 8-bit preamble)
 				CLOCK_HIGH();
 
-				groupByBank(pruPins, function(pins, gpioBank) {
+				groupByBank(pruPins, function(pins, gpioBank, usedBank) {
 					// Bring all data low for this bank
 					DATAS_LOW(pins);
 
@@ -200,19 +206,22 @@ module.exports = function(
 						TEST_BIT_ONE(pin);
 					});
 
+					if (usedBank == 0) {
+						// Clock LOW
+						CLOCK_LOW();
+					}
+
 					// Apply the changes
 					PREP_GPIO_FOR_SET(gpioBank);
 					APPLY_GPIO_CHANGES();
 				});
 
-				// Clock LOW
-				CLOCK_LOW();
 
 				QBNE(l_bit_loop, r_bit_num, 0);
 			});
 
 			// Clock pulse for final bit
-			CLOCK_PULSE();
+			CLOCK_PULSE(5);
 
 			// The RGB streams have been clocked out
 			// Move to the next pixel on each row
@@ -242,7 +251,7 @@ module.exports = function(
 				var l_end_bit_loop = emitLabel("l_end_bit_loop");
 				DECREMENT(r_bit_num);
 
-				CLOCK_PULSE();
+				CLOCK_PULSE(5);
 
 				QBNE(l_end_bit_loop, r_bit_num, 0);
 			});

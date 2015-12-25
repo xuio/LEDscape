@@ -4,6 +4,9 @@ var pruPins = global.pinsByPruNum[PRU_NUM];
 var rawPruCode = "";
 var pruWhitespace = [];
 
+var labelCounter = 0;
+function nextLabel(prefix) { return prefix + labelCounter ++ }
+
 function emitLine(s) { rawPruCode += (s === undefined ? "" : (pruWhitespace.join("") + s)) + "\n"; }
 var labelCounter = 0;
 function emitLabel(s, skipNewLine) {
@@ -120,7 +123,7 @@ function QBLT() { emitInstr("QBLT", arguments); }
 function QBLE() { emitInstr("QBLE", arguments); }
 function QBEQ() { emitInstr("QBEQ", arguments); }
 function QBNE() { emitInstr("QBNE", arguments); }
-function QBA()  { emitInstr("QBA", arguments);  }
+function QBA(label)  { emitInstr("QBA", arguments);  }
 function QBBS(label, reg, bit) { emitInstr("QBBS", arguments, "if (" + reg + " & (1 << " + bit + ") != 0) goto " + label); }
 function QBBC(label, reg, bit) { emitInstr("QBBC", arguments, "if (" + reg + " & (1 << " + bit + ") == 0) goto " + label); }
 function WBS()  { emitInstr("WBS", arguments);  }
@@ -128,10 +131,15 @@ function WBC()  { emitInstr("WBC", arguments);  }
 function HALT() { emitInstr("HALT", arguments); }
 function SLP()  { emitInstr("SLP", arguments);  }
 
-
 function ST32() { emitInstr("ST32", arguments); }
 function NOP() { MOV(r0, r0); }
 function DECREMENT(r) { emitInstr("DECREMENT", arguments, r + " --"); }
+function RESET_COUNTER() { emitInstr("RESET_COUNTER", arguments); }
+function RAISE_ARM_INTERRUPT() { emitInstr("RAISE_ARM_INTERRUPT", arguments); }
+
+function WAITNS(waitNs, waitLabel) { emitInstr("WAITNS", [waitNs, waitLabel || nextLabel("waitNs")]); }
+function WAIT_TIMEOUT(timeoutNs, timeoutLabel) { emitInstr("WAIT_TIMEOUT", [timeoutNs, timeoutLabel]); }
+function SLEEPNS(sleepNs, sleepLabel) { emitInstr("SLEEPNS", [sleepNs, 0, sleepLabel || nextLabel("sleepNs")]); }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 var r0  = { toString: function() { return 'r0' }, b0: "r0.b0", b1: "r0.b1", b2: "r0.b2", b3: "r0.b3", w0: "r0.w0", w1: "r0.w1"};
@@ -205,11 +213,18 @@ var C31 = 'C31';
 // Temp and Control Registers
 var r_data_addr     = r0;
 var r_data_len      = r1;
-var r_bit_num       = r2.w0;
-var r_sleep_counter = r2.w1;
+var r_bit_num       = r2.b0;
 var r_temp_addr     = r3;
 var r_temp1         = r4;
+var r_temp2         = r29;
 var r_data_len2     = r29.w0;
+
+var r_bit_regs = [
+	r_temp1,
+	r_data_addr,
+	r_temp2,
+	r30
+];
 ///////////////////////////////////////////////////////////////////////////////////
 
 var r_data0         = r5;
@@ -337,9 +352,9 @@ function PREP_GPIO_FOR_SET(gpioBank) {
 	lastGpioPrepBank = gpioBank;
 }
 
-function APPLY_GPIO_CHANGES() {
+function APPLY_GPIO_CHANGES(maskReg) {
 	emitComment("Apply GPIO bank " + lastGpioPrepBank + " changes");
-	SBBO(r_temp1, r_temp_addr, 0, 4);
+	SBBO(maskReg || r_temp1, r_temp_addr, 0, 4);
 }
 
 /**
@@ -356,12 +371,13 @@ function RESET_GPIO_MASK() {
  *
  * @param pin The pin whose bit should be tested
  */
-function TEST_BIT_ZERO(pin) {
+function TEST_BIT_ZERO(pin, gpioReg) {
 	var label_name = "channel_" + pin.pruDataChannel + "_zero_skip";
+	gpioReg = gpioReg || r_temp1;
 
 	emitComment("Test if pin (pruDataChannel=" + pin.pruDataChannel + ", global="+pin.dataChannelIndex+") is ZERO and SET bit " + pin.gpioBit + " in GPIO" + pin.gpioBank + " register");
 	QBBS(label_name, r_datas[pin.pruDataChannel], r_bit_num);
-	SET(r_temp1, r_temp1, pin.gpioBit);
+	SET(gpioReg, gpioReg, pin.gpioBit);
 	emitLabel(label_name, true);
 }
 
@@ -387,9 +403,10 @@ function shortNameForPin(pin) {
 function LOAD_CHANNEL_DATA(firstPin, firstChannel, channelCount) {
 	emitComment("Load " + channelCount + " channels of data into data registers");
 
+	LBCO(r_temp_addr, CONST_PRUDRAM, 0, 4);
 	LBBO(
 		r_data0,
-		r_data_addr,
+		r_temp_addr,
 		firstPin.dataChannelIndex*4 + firstChannel*4,
 		channelCount*4
 	);
@@ -423,17 +440,19 @@ function groupByBank(
 		pinsByBank[pin.gpioBank].push(pin);
 	});
 
-	var multipleBanksUsed = pinsByBank.filter(function(bankPins) { return bankPins.length > 0 }).length > 1;
+	var usedBanks = pinsByBank.filter(function(bankPins) { return bankPins.length > 0 });
+	var multipleBanksUsed = usedBanks.length > 1;
 
+	var usedBankIndex = 0;
 	pinsByBank.forEach(function(pins, bankIndex){
 		if (pins.length > 0) {
 			if (multipleBanksUsed) {
 				emitComment("Bank " + bankIndex);
 				pruBlock(function () {
-					callback(pins, bankIndex);
+					callback(pins, bankIndex, usedBankIndex ++, usedBanks.length);
 				});
 			} else {
-				callback(pins, bankIndex);
+				callback(pins, bankIndex, usedBankIndex ++, usedBanks.length);
 			}
 		}
 	});

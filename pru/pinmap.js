@@ -250,7 +250,6 @@ global.applyPerPruClockMapping = function(
 	});
 };
 
-
 global.applyInterlacedClockPinMapping = function(
 	pinsPerPru
 ) {
@@ -276,6 +275,29 @@ global.applyInterlacedClockPinMapping = function(
 
 				pin.pruClockChannel = Math.floor(pin.pruPin / 2);
 			}
+
+			(pinsByPruNum[pin.pruIndex] = pinsByPruNum[pin.pruIndex]||[])[pin.pruPin] = pin;
+		}
+	});
+};
+
+
+global.applySingleDataPinMapping = function(
+	pinsPerPru
+) {
+	pinsByPruNum.length = 0;
+	pinsByDataChannelIndex.length = 0;
+
+	pinData.forEach(function(pin) {
+		pin.pruIndex = pin.mappedChannelIndex < pinsPerPru ? 0 : 1;
+		pin.pruPin = pin.mappedChannelIndex - (pin.pruIndex * pinsPerPru);
+		pin.pruDataChannel = pin.pruPin;
+
+		if (pin.pruPin < pinsPerPru) {
+			var newChannel = pin.pruIndex * pinsPerPru + pin.pruPin;
+
+			pin.dataChannelIndex = newChannel;
+			pinsByDataChannelIndex[newChannel] = pin;
 
 			(pinsByPruNum[pin.pruIndex] = pinsByPruNum[pin.pruIndex]||[])[pin.pruPin] = pin;
 		}

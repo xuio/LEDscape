@@ -13,8 +13,7 @@
 #define r_bit_num       r2.w0
 #define r_sleep_counter r2.w1
 #define r_temp_addr r3
-#define r_temp1 r4.w0
-#define r_temp2 r4.w1
+#define r_temp1 r4
 
 
 // ***************************************
@@ -151,7 +150,7 @@
 //
 .macro SLEEPNS
 .mparam ns,inst,lab
-	MOV r_sleep_counter, (ns/10)-1-inst // ws2811 -- high speed
+	MOV r_sleep_counter, (ns/5)-1-inst // ws2811 -- high speed
 lab:
 	SUB r_sleep_counter, r_sleep_counter, 1
 	QBNE lab, r_sleep_counter, 0
@@ -163,37 +162,33 @@ lab:
 .mparam ns,lab
 	MOV r_temp_addr, PRU_CONTROL_ADDRESS // control register
 
-	// Instructions take 5ns and RESET_COUNTER takes about 20 instructions
-	// this value was found through trial and error on the DMX signal
-	// generation
-	MOV r_temp2, (ns)/5 - 20
 lab:
-	LBBO r_temp1, r_temp_addr, 0xC, 4 // read the cycle counter
-//	SUB r9, r9, r_sleep_counter
-	QBGT lab, r_temp1, r_temp2
+	LBBO r_sleep_counter, r_temp_addr, 0xC, 2 // read the cycle counter
+	QBGT lab, r_sleep_counter, (ns)/5
 .endm
 
 // Used after WAITNS to jump to a label if too much time has elapsed
 .macro WAIT_TIMEOUT
 .mparam timeoutNs, timeoutLabel
     // Check that we haven't waited too long (waiting for memory, etc...) and if we have, jump to a timeout label
-    MOV r_temp2, ((timeoutNs)/5 - 20)
-    QBGT timeoutLabel, r_temp2, r_temp1
+    MOV r_sleep_counter, (timeoutNs)/5
+    QBGT timeoutLabel, r_sleep_counter, r_temp1
 .endm
 
 // Reset the cycle counter
 .macro RESET_COUNTER
 		// Disable the counter and clear it, then re-enable it
 		MOV r_temp_addr, PRU_CONTROL_ADDRESS // control register
-		LBBO r9, r_temp_addr, 0, 4
-		CLR r9, r9, 3 // disable counter bit
-		SBBO r9, r_temp_addr, 0, 4 // write it back
+		LBBO r_temp1, r_temp_addr, 0, 4
+		CLR r_temp1, r_temp1, 3 // disable counter bit
+		SBBO r_temp1, r_temp_addr, 0, 4 // write it back
 
-		MOV r_temp2, 0
-		SBBO r_temp2, r_temp_addr, 0xC, 4 // clear the timer
+		MOV r_temp1, 12
+		SBBO r_temp1, r_temp_addr, 0x0C, 4 // clear the timer
 
-		SET r9, r9, 3 // enable counter bit
-		SBBO r9, r_temp_addr, 0, 4 // write it back
+		LBBO r_temp1, r_temp_addr, 0, 4
+		SET r_temp1, r_temp1, 3 // enable counter bit
+		SBBO r_temp1, r_temp_addr, 0, 4 // write it back
 
 		// Read the current counter value
 		// Should be zero.
