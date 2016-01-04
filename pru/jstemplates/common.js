@@ -1,500 +1,573 @@
-if (typeof PRU_NUM === "undefined") throw new Error("PRU_NUM must be defined");
-var pruPins = global.pinsByPruNum[PRU_NUM];
-
-var rawPruCode = "";
-var pruWhitespace = [];
-
-var labelCounter = 0;
-function nextLabel(prefix) { return prefix + labelCounter ++ }
-
-function emitLine(s) { rawPruCode += (s === undefined ? "" : (pruWhitespace.join("") + s)) + "\n"; }
-var labelCounter = 0;
-function emitLabel(s, skipNewLine) {
-	if (!s) {
-		s = "_label_" + (++labelCounter);
-	}
-	if (! skipNewLine) {
-		emitLine();
-	}
-	emitLine(s + ":");
-	return s;
-}
-
-function pruBlock(code) {
-	pruWhitespace.push("  ");
-	try {
-		return code();
-	} finally {
-		pruWhitespace.pop();
-	}
-}
-
-
-// Generic instructions
-function emitInstr(name, args, comment) {
-	var s = name;
-	if (args) {
-		for (var i = 0; i < args.length; i++) {
-			if (i > 0) s+= ", ";
-			else s += " ";
-			if (isNaN(args[i])) {
-				s += args[i];
-			} else {
-				s += toNumericLiteral(args[i]);
-			}
-		}
-	}
-	s += ";";
-	if (comment) {
-		s += " // " + comment;
-	}
-	emitLine(s);
-}
-
-function emitComment(s) {
-	emitLine("// " + s);
-}
-
-function toNumericLiteral(n) {
-	n = parseInt(n);
-	if (n < 65536) {
-		return n + "";
-	} else {
-		return toHexLiteral(n);
-	}
-}
-
-function toHexLiteral(n) {
-	if (n < 0) {
-		n = 0xFFFFFFFF + n + 1;
-	}
-	var s =  n.toString(16).toUpperCase();
-	while (s.length % 2 != 0) {
-		s = "0" + s;
-	}
-	return "0x" + s;
-}
-
-function ADC(dest, a, b)  { emitInstr("ADC", arguments);  }
-function ADD(dest, a, b)  { emitInstr("ADD", arguments, dest + " = " + a + " + " + b);  }
-function SUB(dest, a, b)  { emitInstr("SUB", arguments, dest + " = " + a + " - " + b);  }
-function SUC(dest, a, b)  { emitInstr("SUC", arguments);  }
-function RSB()  { emitInstr("RSB", arguments);  }
-function RSC()  { emitInstr("RSC", arguments);  }
-function LSL()  { emitInstr("LSL", arguments);  }
-function LSR()  { emitInstr("LSR", arguments);  }
-function AND()  { emitInstr("AND", arguments);  }
-function OR()   { emitInstr("OR", arguments);   }
-function XOR()  { emitInstr("XOR", arguments);  }
-function NOT()  { emitInstr("NOT", arguments);  }
-function MIN()  { emitInstr("MIN", arguments);  }
-function MAX()  { emitInstr("MAX", arguments);  }
-function CLR()  { emitInstr("CLR", arguments);  }
-function SET()  { emitInstr("SET", arguments);  }
-function SCAN() { emitInstr("SCAN", arguments); }
-function LMBD() { emitInstr("LMBD", arguments); }
-function MOV()  { emitInstr("MOV", arguments);  }
-function LDI()  { emitInstr("LDI", arguments);  }
-function LBBO(srcReg, addrReg, addrOffset, byteCount) {
-	emitInstr(
-		"LBBO",
-		arguments,
-		(addrOffset == 0 && byteCount == 4)
-			? ("store the value of " + srcReg + " into &" + addrReg)
-			: ("store " + byteCount + " bytes into " + addrReg + " + " + addrOffset + " from registers starting at " + srcReg)
-	);
-}
-function SBBO(destReg, addrReg, addrOffset, byteCount) { emitInstr("SBBO", arguments, "copy " + byteCount + " bytes from " + addrReg + " + " + addrOffset + " into registers starting at " + destReg); }
-function LBCO() { emitInstr("LBCO", arguments); }
-function SBCO() { emitInstr("SBCO", arguments); }
-function LFC()  { emitInstr("LFC", arguments);  }
-function STC()  { emitInstr("STC", arguments);  }
-function ZERO() { emitInstr("ZERO", arguments); }
-function MVIB() { emitInstr("MVIB", arguments); }
-function MVIW() { emitInstr("MVIW", arguments); }
-function MVID() { emitInstr("MVID", arguments); }
-function JMP()  { emitInstr("JMP", arguments);  }
-function JAL()  { emitInstr("JAL", arguments);  }
-function CALL() { emitInstr("CALL", arguments); }
-function RET()  { emitInstr("RET", arguments);  }
-function QBGT() { emitInstr("QBGT", arguments); }
-function QBGE() { emitInstr("QBGE", arguments); }
-function QBLT() { emitInstr("QBLT", arguments); }
-function QBLE() { emitInstr("QBLE", arguments); }
-function QBEQ() { emitInstr("QBEQ", arguments); }
-function QBNE() { emitInstr("QBNE", arguments); }
-function QBA(label)  { emitInstr("QBA", arguments);  }
-function QBBS(label, reg, bit) { emitInstr("QBBS", arguments, "if (" + reg + " & (1 << " + bit + ") != 0) goto " + label); }
-function QBBC(label, reg, bit) { emitInstr("QBBC", arguments, "if (" + reg + " & (1 << " + bit + ") == 0) goto " + label); }
-function WBS()  { emitInstr("WBS", arguments);  }
-function WBC()  { emitInstr("WBC", arguments);  }
-function HALT() { emitInstr("HALT", arguments); }
-function SLP()  { emitInstr("SLP", arguments);  }
-
-function ST32() { emitInstr("ST32", arguments); }
-function NOP() { MOV(r0, r0); }
-function DECREMENT(r) { emitInstr("DECREMENT", arguments, r + " --"); }
-function RESET_COUNTER() { emitInstr("RESET_COUNTER", arguments); }
-function RAISE_ARM_INTERRUPT() { emitInstr("RAISE_ARM_INTERRUPT", arguments); }
-
-function WAITNS(waitNs, waitLabel) { emitInstr("WAITNS", [waitNs, waitLabel || nextLabel("waitNs")]); }
-function WAIT_TIMEOUT(timeoutNs, timeoutLabel) { emitInstr("WAIT_TIMEOUT", [timeoutNs, timeoutLabel]); }
-function SLEEPNS(sleepNs, sleepLabel) { emitInstr("SLEEPNS", [sleepNs, 0, sleepLabel || nextLabel("sleepNs")]); }
-
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-var r0  = { toString: function() { return 'r0' }, b0: "r0.b0", b1: "r0.b1", b2: "r0.b2", b3: "r0.b3", w0: "r0.w0", w1: "r0.w1"};
-var r1  = { toString: function() { return 'r1' }, b0: "r1.b0", b1: "r1.b1", b2: "r1.b2", b3: "r1.b3", w0: "r1.w0", w1: "r1.w1" };
-var r2  = { toString: function() { return 'r2' }, b0: "r2.b0", b1: "r2.b1", b2: "r2.b2", b3: "r2.b3", w0: "r2.w0", w1: "r2.w1" };
-var r3  = { toString: function() { return 'r3' }, b0: "r3.b0", b1: "r3.b1", b2: "r3.b2", b3: "r3.b3", w0: "r3.w0", w1: "r3.w1" };
-var r4  = { toString: function() { return 'r4' }, b0: "r4.b0", b1: "r4.b1", b2: "r4.b2", b3: "r4.b3", w0: "r4.w0", w1: "r4.w1" };
-var r5  = { toString: function() { return 'r5' }, b0: "r5.b0", b1: "r5.b1", b2: "r5.b2", b3: "r5.b3", w0: "r5.w0", w1: "r5.w1" };
-var r6  = { toString: function() { return 'r6' }, b0: "r6.b0", b1: "r6.b1", b2: "r6.b2", b3: "r6.b3", w0: "r6.w0", w1: "r6.w1" };
-var r7  = { toString: function() { return 'r7' }, b0: "r7.b0", b1: "r7.b1", b2: "r7.b2", b3: "r7.b3", w0: "r7.w0", w1: "r7.w1" };
-var r8  = { toString: function() { return 'r8' }, b0: "r8.b0", b1: "r8.b1", b2: "r8.b2", b3: "r8.b3", w0: "r8.w0", w1: "r8.w1" };
-var r9  = { toString: function() { return 'r9' }, b0: "r9.b0", b1: "r9.b1", b2: "r9.b2", b3: "r9.b3", w0: "r9.w0", w1: "r9.w1" };
-var r10 = { toString: function() { return 'r10' }, b0: "r10.b0", b1: "r10.b1", b2: "r10.b2", b3: "r10.b3", w0: "r10.w0", w1: "r10.w1" };
-var r11 = { toString: function() { return 'r11' }, b0: "r11.b0", b1: "r11.b1", b2: "r11.b2", b3: "r11.b3", w0: "r11.w0", w1: "r11.w1" };
-var r12 = { toString: function() { return 'r12' }, b0: "r12.b0", b1: "r12.b1", b2: "r12.b2", b3: "r12.b3", w0: "r12.w0", w1: "r12.w1" };
-var r13 = { toString: function() { return 'r13' }, b0: "r13.b0", b1: "r13.b1", b2: "r13.b2", b3: "r13.b3", w0: "r13.w0", w1: "r13.w1" };
-var r14 = { toString: function() { return 'r14' }, b0: "r14.b0", b1: "r14.b1", b2: "r14.b2", b3: "r14.b3", w0: "r14.w0", w1: "r14.w1" };
-var r15 = { toString: function() { return 'r15' }, b0: "r15.b0", b1: "r15.b1", b2: "r15.b2", b3: "r15.b3", w0: "r15.w0", w1: "r15.w1" };
-var r16 = { toString: function() { return 'r16' }, b0: "r16.b0", b1: "r16.b1", b2: "r16.b2", b3: "r16.b3", w0: "r16.w0", w1: "r16.w1" };
-var r17 = { toString: function() { return 'r17' }, b0: "r17.b0", b1: "r17.b1", b2: "r17.b2", b3: "r17.b3", w0: "r17.w0", w1: "r17.w1" };
-var r18 = { toString: function() { return 'r18' }, b0: "r18.b0", b1: "r18.b1", b2: "r18.b2", b3: "r18.b3", w0: "r18.w0", w1: "r18.w1" };
-var r19 = { toString: function() { return 'r19' }, b0: "r19.b0", b1: "r19.b1", b2: "r19.b2", b3: "r19.b3", w0: "r19.w0", w1: "r19.w1" };
-var r20 = { toString: function() { return 'r20' }, b0: "r20.b0", b1: "r20.b1", b2: "r20.b2", b3: "r20.b3", w0: "r20.w0", w1: "r20.w1" };
-var r21 = { toString: function() { return 'r21' }, b0: "r21.b0", b1: "r21.b1", b2: "r21.b2", b3: "r21.b3", w0: "r21.w0", w1: "r21.w1" };
-var r22 = { toString: function() { return 'r22' }, b0: "r22.b0", b1: "r22.b1", b2: "r22.b2", b3: "r22.b3", w0: "r22.w0", w1: "r22.w1" };
-var r23 = { toString: function() { return 'r23' }, b0: "r23.b0", b1: "r23.b1", b2: "r23.b2", b3: "r23.b3", w0: "r23.w0", w1: "r23.w1" };
-var r24 = { toString: function() { return 'r24' }, b0: "r24.b0", b1: "r24.b1", b2: "r24.b2", b3: "r24.b3", w0: "r24.w0", w1: "r24.w1" };
-var r25 = { toString: function() { return 'r25' }, b0: "r25.b0", b1: "r25.b1", b2: "r25.b2", b3: "r25.b3", w0: "r25.w0", w1: "r25.w1" };
-var r26 = { toString: function() { return 'r26' }, b0: "r26.b0", b1: "r26.b1", b2: "r26.b2", b3: "r26.b3", w0: "r26.w0", w1: "r26.w1" };
-var r27 = { toString: function() { return 'r27' }, b0: "r27.b0", b1: "r27.b1", b2: "r27.b2", b3: "r27.b3", w0: "r27.w0", w1: "r27.w1" };
-var r28 = { toString: function() { return 'r28' }, b0: "r28.b0", b1: "r28.b1", b2: "r28.b2", b3: "r28.b3", w0: "r28.w0", w1: "r28.w1" };
-var r29 = { toString: function() { return 'r29' }, b0: "r29.b0", b1: "r29.b1", b2: "r29.b2", b3: "r29.b3", w0: "r29.w0", w1: "r29.w1" };
-var r30 = { toString: function() { return 'r30' }, b0: "r30.b0", b1: "r30.b1", b2: "r30.b2", b3: "r30.b3", w0: "r30.w0", w1: "r30.w1" };
-var r31 = { toString: function() { return 'r31' }, b0: "r31.b0", b1: "r31.b1", b2: "r31.b2", b3: "r31.b3", w0: "r31.w0", w1: "r31.w1" };
-
-var C0  = 'C0';
-var C1  = 'C1';
-var C2  = 'C2';
-var C3  = 'C3';
-var C4  = 'C4';
-var C5  = 'C5';
-var C6  = 'C6';
-var C7  = 'C7';
-var C8  = 'C8';
-var C9  = 'C9';
-var C10 = 'C10';
-var C11 = 'C11';
-var C12 = 'C12';
-var C13 = 'C13';
-var C14 = 'C14';
-var C15 = 'C15';
-var C16 = 'C16';
-var C17 = 'C17';
-var C18 = 'C18';
-var C19 = 'C19';
-var C20 = 'C20';
-var C21 = 'C21';
-var C22 = 'C22';
-var C23 = 'C23';
-var C24 = 'C24';
-var C25 = 'C25';
-var C26 = 'C26';
-var C27 = 'C27';
-var C28 = 'C28';
-var C29 = 'C29';
-var C30 = 'C30';
-var C31 = 'C31';
-
-
-///////////////////////////////////////////////////////////////////////////////////
-// Temp and Control Registers
-var r_data_addr     = r0;
-var r_data_len      = r1;
-var r_bit_num       = r2.b0;
-var r_temp_addr     = r3;
-var r_temp1         = r4;
-var r_temp2         = r29;
-var r_data_len2     = r29.w0;
-
-var r_bit_regs = [
-	r_temp1,
-	r_data_addr,
-	r_temp2,
-	r30
-];
-///////////////////////////////////////////////////////////////////////////////////
-
-var r_data0         = r5;
-var r_data1         = r6;
-var r_data2         = r7;
-var r_data3         = r8;
-var r_data4         = r9;
-var r_data5         = r10;
-var r_data6         = r11;
-var r_data7         = r12;
-var r_data8         = r13;
-var r_data9         = r14;
-var r_data10        = r15;
-var r_data11        = r16;
-var r_data12        = r17;
-var r_data13        = r18;
-var r_data14        = r19;
-var r_data15        = r20;
-var r_data16        = r21;
-var r_data17        = r22;
-var r_data18        = r23;
-var r_data19        = r24;
-var r_data20        = r25;
-var r_data21        = r26;
-var r_data22        = r27;
-var r_data23        = r28;
-
-var r_datas         = [
- r_data0, r_data1,  r_data2,  r_data3,  r_data4,  r_data5,  r_data6,  r_data7,  r_data8,  r_data9,  r_data10, r_data11,
-r_data12, r_data13, r_data14, r_data15, r_data16, r_data17, r_data18, r_data19, r_data20, r_data21, r_data22, r_data23
-];
-
-var PRU0_PRU1_INTERRUPT = 17;
-var PRU1_PRU0_INTERRUPT = 18;
-var PRU0_ARM_INTERRUPT  = 19;
-var PRU1_ARM_INTERRUPT  = 20;
-var ARM_PRU0_INTERRUPT  = 21;
-var ARM_PRU1_INTERRUPT  = 22;
-
-var CONST_PRUDRAM       = C24;
-var CONST_SHAREDRAM     = C28;
-var CONST_L3RAM         = C30;
-var CONST_DDR           = C31;
-
-// Address for the Constant table Programmable Pointer Register 0(CTPPR_0)
-var CTBIR_0 = '0x22020';
-// Address for the Constant table Programmable Pointer Register 0(CTPPR_0)
-var CTBIR_1 = '0x22024';
-
-// Address for the Constant table Programmable Pointer Register 0(CTPPR_0)
-var CTPPR_0 = '0x22028';
-// Address for the Constant table Programmable Pointer Register 1(CTPPR_1)
-var CTPPR_1 = '0x2202C';
-
-var sp           = r0;
-var lr           = r23;
-var STACK_TOP    = (0x2000 - 4);
-var STACK_BOTTOM = (0x2000 - 0x200);
-
-
-/** Mappings of the GPIO devices */
-var GPIO0 = 0x44E07000;
-var GPIO1 = 0x4804c000;
-var GPIO2 = 0x481AC000;
-var GPIO3 = 0x481AE000;
-var GPIO_ADDRS = [GPIO0, GPIO1, GPIO2, GPIO3];
-
-/** Offsets for the clear and set registers in the devices */
-var GPIO_CLEARDATAOUT = 0x190;
-var GPIO_SETDATAOUT = 0x194;
-
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-var PRU_CONTROL_ADDRESS = PRU_NUM === 0 ? '0x22000' : '0x24000';
-var PRU_ARM_INTERRUPT = PRU_NUM === 0 ? PRU0_ARM_INTERRUPT : PRU1_ARM_INTERRUPT;
-
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-function INIT_PRU() {
-	emitLine("#define PRU" + PRU_NUM);
-	emitLine('#include "common.p.h"');
-	emitComment("Intialize the PRU");
-
-	emitLine("START:");
-
-	emitComment('Enable OCP master port');
-	emitComment('clear the STANDBY_INIT bit in the SYSCFG register,');
-	emitComment('otherwise the PRU will not be able to write outside the');
-	emitComment('PRU memory space and to the BeagleBone\'s pins.');
-	LBCO(r0, C4, 4, 4);
-	CLR(r0, r0, 4);
-	SBCO(r0, C4, 4, 4);
-
-	emitComment('Configure the programmable pointer register for PRU0 by setting');
-	emitComment('c28_pointer[15:0] field to 0x0120.  This will make C28 point to');
-	emitComment('0x00012000 (PRU shared RAM).');
-	MOV(r0, '0x00000120');
-	MOV(r1, CTPPR_0);
-	ST32(r0, r1);
-
-	emitComment('Configure the programmable pointer register for PRU0 by setting');
-	emitComment('c31_pointer[15:0] field to 0x0010.  This will make C31 point to');
-	emitComment('0x80001000 (DDR memory).');
-	MOV(r0, '0x00100000');
-	MOV(r1, CTPPR_1);
-	ST32(r0, r1);
-
-	emitComment('Write a 0x1 into the response field so that they know we have started');
-	MOV(r2, 1);
-	SBCO(r2, CONST_PRUDRAM, 12, 4);
-	MOV(r20, '0xFFFFFFFF');
-}
-
-var lastGpioPrepBank = -1;
-
-function PREP_GPIO_FOR_CLEAR(gpioBank) {
-	emitComment("Prep GPIO address register for CLEAR on GPIO bank " + gpioBank);
-	MOV(r_temp_addr, GPIO_ADDRS[gpioBank] | GPIO_CLEARDATAOUT);
-	lastGpioPrepBank = gpioBank;
-}
-
-function PREP_GPIO_FOR_SET(gpioBank) {
-	emitComment("Prep GPIO address register for SET on GPIO bank " + gpioBank);
-	MOV(r_temp_addr, GPIO_ADDRS[gpioBank] | GPIO_SETDATAOUT);
-	lastGpioPrepBank = gpioBank;
-}
-
-function APPLY_GPIO_CHANGES(maskReg) {
-	emitComment("Apply GPIO bank " + lastGpioPrepBank + " changes");
-	SBBO(maskReg || r_temp1, r_temp_addr, 0, 4);
-}
-
+var __extends = (this && this.__extends) || function (d, b) {
+    for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p];
+    function __() { this.constructor = d; }
+    d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
+};
+var bbbPinData_1 = require('../bbbPinData');
+var PruRegister = (function () {
+    function PruRegister(name, offset, size) {
+        this.name = name;
+        this.offset = offset;
+        this.size = size;
+    }
+    PruRegister.prototype.toString = function () {
+        return this.name;
+    };
+    return PruRegister;
+})();
+exports.PruRegister = PruRegister;
+var PruWholeRegister = (function (_super) {
+    __extends(PruWholeRegister, _super);
+    function PruWholeRegister(index) {
+        _super.call(this, "r" + index, 0, 32);
+        this.index = index;
+        this.w0 = new PruRegister(this.name + ".w0", 0, 16);
+        this.w1 = new PruRegister(this.name + ".w1", 16, 16);
+        this.b0 = new PruRegister(this.name + ".b0", 0, 16);
+        this.b1 = new PruRegister(this.name + ".b1", 8, 16);
+        this.b2 = new PruRegister(this.name + ".b2", 16, 16);
+        this.b3 = new PruRegister(this.name + ".b3", 24, 16);
+    }
+    return PruWholeRegister;
+})(PruRegister);
+exports.PruWholeRegister = PruWholeRegister;
+var GeneratedPruProgram = (function () {
+    function GeneratedPruProgram(pruCode, usedPins) {
+        this.pruCode = pruCode;
+        this.usedPins = usedPins;
+    }
+    return GeneratedPruProgram;
+})();
+exports.GeneratedPruProgram = GeneratedPruProgram;
 /**
- * Zeros the registers used to store which bits should be one for each GPIO bank
+ * Base PRU Program class which provides very little setup.
  */
-function RESET_GPIO_MASK() {
-	emitComment("Reset GPIO one registers");
-	MOV(r_temp1, 0);
-}
-
-/**
- * Checks if the bit indexed by the r_bit_num register in the regN register is a zero, and if so, sets the bit in the
- * corresponding _zeros register. CHANNEL_BANK_NAME and CHANNEL_BIT are used to lookup the bank and bit num.
- *
- * @param pin The pin whose bit should be tested
- */
-function TEST_BIT_ZERO(pin, gpioReg) {
-	var label_name = "channel_" + pin.pruDataChannel + "_zero_skip";
-	gpioReg = gpioReg || r_temp1;
-
-	emitComment("Test if pin (pruDataChannel=" + pin.pruDataChannel + ", global="+pin.dataChannelIndex+") is ZERO and SET bit " + pin.gpioBit + " in GPIO" + pin.gpioBank + " register");
-	QBBS(label_name, r_datas[pin.pruDataChannel], r_bit_num);
-	SET(gpioReg, gpioReg, pin.gpioBit);
-	emitLabel(label_name, true);
-}
-
-/**
- * Checks if the bit indexed by the r_bit_num register in the regN register is a one, and if so, sets the bit in the
- * corresponding _ones register. CHANNEL_BANK_NAME and CHANNEL_BIT are used to lookup the bank and bit num.
- *
- * @param pin The pin whose bit should be tested
- */
-function TEST_BIT_ONE(pin) {
-	var label_name = "channel_" + pin.pruDataChannel + "_one_skip";
-
-	emitComment("Test if pin (pruDataChannel=" + pin.pruDataChannel + ", global="+pin.dataChannelIndex+") is ONE and SET bit " + pin.gpioBit + " in GPIO" + pin.gpioBank + " register");
-	QBBC(label_name, r_datas[pin.pruDataChannel], r_bit_num);
-	SET(r_temp1, r_temp1, pin.gpioBit);
-	emitLabel(label_name, true);
-}
-
-function shortNameForPin(pin) {
-	return pin.mappedChannelIndex >= 0 ? pin.mappedChannelIndex : pin.gpioFullName;
-}
-
-function LOAD_CHANNEL_DATA(firstPin, firstChannel, channelCount) {
-	emitComment("Load " + channelCount + " channels of data into data registers");
-
-	LBCO(r_temp_addr, CONST_PRUDRAM, 0, 4);
-	LBBO(
-		r_data0,
-		r_temp_addr,
-		firstPin.dataChannelIndex*4 + firstChannel*4,
-		channelCount*4
-	);
-}
-
-function PREP_GPIO_MASK_FOR_PINS(pins) {
-	emitComment("Set the GPIO (bank " + pins[0].gpioBank + ") mask register for setting or clearing channels " + pins.map(shortNameForPin).join(", "));
-
-	var mask = 0;
-	var bank = -1;
-
-	pins.forEach(function(pin) {
-		if (bank != -1 && bank != pin.gpioBank) {
-			throw new Error("Cannot load mask for multiple GPIO banks: " + pins);
-		} else {
-			bank = pin.gpioBank;
-		}
-
-		mask |= 1 << pin.gpioBit;
-	});
-
-	MOV(r_temp1, toHexLiteral(mask));
-}
-
-function groupByBank(
-	allPins,
-	callback
-) {
-	var pinsByBank = [[], [], [], []];
-	allPins.forEach(function(pin) {
-		pinsByBank[pin.gpioBank].push(pin);
-	});
-
-	var usedBanks = pinsByBank.filter(function(bankPins) { return bankPins.length > 0 });
-	var multipleBanksUsed = usedBanks.length > 1;
-
-	var usedBankIndex = 0;
-	pinsByBank.forEach(function(pins, bankIndex){
-		if (pins.length > 0) {
-			if (multipleBanksUsed) {
-				emitComment("Bank " + bankIndex);
-				pruBlock(function () {
-					callback(pins, bankIndex, usedBankIndex ++, usedBanks.length);
-				});
-			} else {
-				callback(pins, bankIndex, usedBankIndex ++, usedBanks.length);
-			}
-		}
-	});
-}
-
-
-function PINS_HIGH(pins, pinsLabel) {
-	emitComment((pinsLabel || "") + ' Pins HIGH: ' + pins.map(shortNameForPin).join(", "));
-
-	pruBlock(function() {
-		groupByBank(pins, function (pins, gpioBank) {
-			PREP_GPIO_FOR_SET(gpioBank);
-			PREP_GPIO_MASK_FOR_PINS(pins);
-			APPLY_GPIO_CHANGES();
-		});
-	});
-}
-
-function PINS_LOW(pins, pinsLabel) {
-	emitComment((pinsLabel || "") + ' Pins LOW: ' + pins.map(shortNameForPin).join(", "));
-
-	pruBlock(function() {
-		groupByBank(pins, function (pins, gpioBank) {
-			PREP_GPIO_FOR_CLEAR(gpioBank);
-			PREP_GPIO_MASK_FOR_PINS(pins);
-			APPLY_GPIO_CHANGES();
-		});
-	});
-}
-
-function PINS_HIGH_LOW(pins, pinsLabel) {
-	emitComment((pinsLabel || "") + ' Pins HIGH-LOW pulse: ' + pins.map(shortNameForPin).join(", "));
-
-	pruBlock(function() {
-		groupByBank(pins, function (pins, gpioBank) {
-			PREP_GPIO_MASK_FOR_PINS(pins);
-
-			PREP_GPIO_FOR_SET(gpioBank);
-			APPLY_GPIO_CHANGES();
-
-			PREP_GPIO_FOR_CLEAR(gpioBank);
-			APPLY_GPIO_CHANGES();
-		});
-	});
-}
+var BasePruProgram = (function () {
+    function BasePruProgram(PRU_NUM) {
+        this.PRU_NUM = PRU_NUM;
+        this.pruCode = "";
+        this.pruWhitespace = [];
+        this.labelCounter = 0;
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        this.r0 = new PruWholeRegister(0);
+        this.r1 = new PruWholeRegister(1);
+        this.r2 = new PruWholeRegister(2);
+        this.r3 = new PruWholeRegister(3);
+        this.r4 = new PruWholeRegister(4);
+        this.r5 = new PruWholeRegister(5);
+        this.r6 = new PruWholeRegister(6);
+        this.r7 = new PruWholeRegister(7);
+        this.r8 = new PruWholeRegister(8);
+        this.r9 = new PruWholeRegister(9);
+        this.r10 = new PruWholeRegister(10);
+        this.r11 = new PruWholeRegister(11);
+        this.r12 = new PruWholeRegister(12);
+        this.r13 = new PruWholeRegister(13);
+        this.r14 = new PruWholeRegister(14);
+        this.r15 = new PruWholeRegister(15);
+        this.r16 = new PruWholeRegister(16);
+        this.r17 = new PruWholeRegister(17);
+        this.r18 = new PruWholeRegister(18);
+        this.r19 = new PruWholeRegister(19);
+        this.r20 = new PruWholeRegister(20);
+        this.r21 = new PruWholeRegister(21);
+        this.r22 = new PruWholeRegister(22);
+        this.r23 = new PruWholeRegister(23);
+        this.r24 = new PruWholeRegister(24);
+        this.r25 = new PruWholeRegister(25);
+        this.r26 = new PruWholeRegister(26);
+        this.r27 = new PruWholeRegister(27);
+        this.r28 = new PruWholeRegister(28);
+        this.r29 = new PruWholeRegister(29);
+        this.r30 = new PruWholeRegister(30);
+        this.r31 = new PruWholeRegister(31);
+        this.C0 = 'C0';
+        this.C1 = 'C1';
+        this.C2 = 'C2';
+        this.C3 = 'C3';
+        this.C4 = 'C4';
+        this.C5 = 'C5';
+        this.C6 = 'C6';
+        this.C7 = 'C7';
+        this.C8 = 'C8';
+        this.C9 = 'C9';
+        this.C10 = 'C10';
+        this.C11 = 'C11';
+        this.C12 = 'C12';
+        this.C13 = 'C13';
+        this.C14 = 'C14';
+        this.C15 = 'C15';
+        this.C16 = 'C16';
+        this.C17 = 'C17';
+        this.C18 = 'C18';
+        this.C19 = 'C19';
+        this.C20 = 'C20';
+        this.C21 = 'C21';
+        this.C22 = 'C22';
+        this.C23 = 'C23';
+        this.C24 = 'C24';
+        this.C25 = 'C25';
+        this.C26 = 'C26';
+        this.C27 = 'C27';
+        this.C28 = 'C28';
+        this.C29 = 'C29';
+        this.C30 = 'C30';
+        this.C31 = 'C31';
+        ///////////////////////////////////////////////////////////////////////////////////
+        // Temp and Control Registers
+        this.r_data_addr = this.r0;
+        this.r_data_len = this.r1;
+        this.r_bit_num = this.r2.b0;
+        this.r_temp_addr = this.r3;
+        this.r_temp1 = this.r4;
+        this.r_temp2 = this.r29;
+        this.r_data_len2 = this.r29.w0;
+        this.r_bit_regs = [
+            this.r_temp1,
+            this.r_data_addr,
+            this.r_temp2,
+            this.r30
+        ];
+        ///////////////////////////////////////////////////////////////////////////////////
+        this.r_data0 = this.r5;
+        this.r_data1 = this.r6;
+        this.r_data2 = this.r7;
+        this.r_data3 = this.r8;
+        this.r_data4 = this.r9;
+        this.r_data5 = this.r10;
+        this.r_data6 = this.r11;
+        this.r_data7 = this.r12;
+        this.r_data8 = this.r13;
+        this.r_data9 = this.r14;
+        this.r_data10 = this.r15;
+        this.r_data11 = this.r16;
+        this.r_data12 = this.r17;
+        this.r_data13 = this.r18;
+        this.r_data14 = this.r19;
+        this.r_data15 = this.r20;
+        this.r_data16 = this.r21;
+        this.r_data17 = this.r22;
+        this.r_data18 = this.r23;
+        this.r_data19 = this.r24;
+        this.r_data20 = this.r25;
+        this.r_data21 = this.r26;
+        this.r_data22 = this.r27;
+        this.r_data23 = this.r28;
+        this.r_datas = [
+            this.r_data0, this.r_data1, this.r_data2, this.r_data3, this.r_data4, this.r_data5, this.r_data6,
+            this.r_data7, this.r_data8, this.r_data9, this.r_data10, this.r_data11, this.r_data12, this.r_data13,
+            this.r_data14, this.r_data15, this.r_data16, this.r_data17, this.r_data18, this.r_data19, this.r_data20,
+            this.r_data21, this.r_data22, this.r_data23
+        ];
+        this.PRU0_PRU1_INTERRUPT = 17;
+        this.PRU1_PRU0_INTERRUPT = 18;
+        this.PRU0_ARM_INTERRUPT = 19;
+        this.PRU1_ARM_INTERRUPT = 20;
+        this.ARM_PRU0_INTERRUPT = 21;
+        this.ARM_PRU1_INTERRUPT = 22;
+        this.CONST_PRUDRAM = this.C24;
+        this.CONST_SHAREDRAM = this.C28;
+        this.CONST_L3RAM = this.C30;
+        this.CONST_DDR = this.C31;
+        // Address for the Constant table Programmable Pointer Register 0(CTPPR_0)
+        this.CTBIR_0 = '0x22020';
+        // Address for the Constant table Programmable Pointer Register 0(CTPPR_0)
+        this.CTBIR_1 = '0x22024';
+        // Address for the Constant table Programmable Pointer Register 0(CTPPR_0)
+        this.CTPPR_0 = '0x22028';
+        // Address for the Constant table Programmable Pointer Register 1(CTPPR_1)
+        this.CTPPR_1 = '0x2202C';
+        this.sp = this.r0;
+        this.lr = this.r23;
+        this.STACK_TOP = (0x2000 - 4);
+        this.STACK_BOTTOM = (0x2000 - 0x200);
+        /** Mappings of the GPIO devices */
+        this.GPIO0 = 0x44E07000;
+        this.GPIO1 = 0x4804c000;
+        this.GPIO2 = 0x481AC000;
+        this.GPIO3 = 0x481AE000;
+        this.GPIO_ADDRS = [this.GPIO0, this.GPIO1, this.GPIO2, this.GPIO3];
+        /** Offsets for the clear and set registers in the devices */
+        this.GPIO_CLEARDATAOUT = 0x190;
+        this.GPIO_SETDATAOUT = 0x194;
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        this.PRU_CONTROL_ADDRESS = this.PRU_NUM === 0 ? '0x22000' : '0x24000';
+        this.PRU_ARM_INTERRUPT = this.PRU_NUM === 0 ? this.PRU0_ARM_INTERRUPT : this.PRU1_ARM_INTERRUPT;
+        this.lastGpioPrepBank = -1;
+    }
+    BasePruProgram.prototype.generate = function () {
+        var _this = this;
+        return new GeneratedPruProgram(this.pruCode, bbbPinData_1.pinIndex.pinData.filter(function (pin) { return pin.pruIndex === _this.PRU_NUM; }));
+    };
+    Object.defineProperty(BasePruProgram.prototype, "pruPins", {
+        get: function () {
+            return bbbPinData_1.pinIndex.pinsByPruAndPin[this.PRU_NUM];
+        },
+        enumerable: true,
+        configurable: true
+    });
+    BasePruProgram.prototype.nextLabel = function (prefix) { return prefix + this.labelCounter++; };
+    BasePruProgram.prototype.emitLine = function (s) {
+        this.pruCode += (s === undefined ? "" : (this.pruWhitespace.join("") + s)) + "\n";
+    };
+    BasePruProgram.prototype.emitLabel = function (s, skipNewLine) {
+        if (!s) {
+            s = "_label_" + (++this.labelCounter);
+        }
+        if (!skipNewLine) {
+            this.emitLine();
+        }
+        this.emitLine(s + ":");
+        return s;
+    };
+    BasePruProgram.prototype.pruBlock = function (arg1, arg2) {
+        var code;
+        if (typeof (arg1) === "string") {
+            this.emitComment(arg1);
+            code = arg2;
+        }
+        else {
+            code = arg1;
+        }
+        this.pruWhitespace.push("  ");
+        try {
+            return code();
+        }
+        finally {
+            this.pruWhitespace.pop();
+        }
+    };
+    // Generic instructions
+    BasePruProgram.prototype.emitInstr = function (name, args, comment) {
+        var code = name;
+        if (args) {
+            for (var i = 0; i < args.length; i++) {
+                if (i > 0)
+                    code += ", ";
+                else
+                    code += " ";
+                if (isNaN(args[i])) {
+                    code += args[i];
+                }
+                else {
+                    code += this.toNumericLiteral(args[i]);
+                }
+            }
+        }
+        code += ";";
+        if (comment) {
+            code += " // " + comment;
+        }
+        this.emitLine(code);
+    };
+    BasePruProgram.prototype.emitComment = function (s) {
+        this.emitLine("// " + s);
+    };
+    BasePruProgram.prototype.toNumericLiteral = function (n) {
+        n = parseInt(n);
+        if (n < 256) {
+            return n + "";
+        }
+        else {
+            return this.toHexLiteral(n);
+        }
+    };
+    BasePruProgram.prototype.toHexLiteral = function (n) {
+        if (n < 0) {
+            n = 0xFFFFFFFF + n + 1;
+        }
+        var s = n.toString(16).toUpperCase();
+        while (s.length % 2 != 0) {
+            s = "0" + s;
+        }
+        return "0x" + s;
+    };
+    BasePruProgram.prototype.ADC = function (dest, src, op) { this.emitInstr("ADC", [dest, src, op]); };
+    BasePruProgram.prototype.ADD = function (dest, src, op) { this.emitInstr("ADD", [dest, src, op], dest + " = " + src + " + " + op); };
+    BasePruProgram.prototype.SUB = function (dest, src, op) { this.emitInstr("SUB", [dest, src, op], dest + " = " + src + " - " + op); };
+    BasePruProgram.prototype.SUC = function (dest, src, op) { this.emitInstr("SUC", [dest, src, op]); };
+    BasePruProgram.prototype.RSB = function (dest, src, op) { this.emitInstr("RSB", [dest, src, op]); };
+    BasePruProgram.prototype.RSC = function (dest, src, op) { this.emitInstr("RSC", [dest, src, op]); };
+    BasePruProgram.prototype.LSL = function (dest, src, op) { this.emitInstr("LSL", [dest, src, op]); };
+    BasePruProgram.prototype.LSR = function (dest, src, op) { this.emitInstr("LSR", [dest, src, op]); };
+    BasePruProgram.prototype.AND = function (dest, src, op) { this.emitInstr("AND", [dest, src, op]); };
+    BasePruProgram.prototype.OR = function (dest, src, op) { this.emitInstr("OR", [dest, src, op]); };
+    BasePruProgram.prototype.XOR = function (dest, src, op) { this.emitInstr("XOR", [dest, src, op]); };
+    BasePruProgram.prototype.NOT = function (dest, src) { this.emitInstr("NOT", [dest, src]); };
+    BasePruProgram.prototype.MIN = function (dest, src, op) { this.emitInstr("MIN", [dest, src, op]); };
+    BasePruProgram.prototype.MAX = function (dest, src, op) { this.emitInstr("MAX", [dest, src, op]); };
+    BasePruProgram.prototype.CLR = function (dest, src, op) { this.emitInstr("CLR", [dest, src, op]); };
+    BasePruProgram.prototype.SET = function (dest, src, op) { this.emitInstr("SET", [dest, src, op]); };
+    BasePruProgram.prototype.SCAN = function (Rn, op) { this.emitInstr("SCAN", [Rn, op]); };
+    BasePruProgram.prototype.LMBD = function (dest, src, op) { this.emitInstr("LMBD", [dest, src, op]); };
+    BasePruProgram.prototype.MOV = function (dest, op) { this.emitInstr("MOV", [dest, op]); };
+    BasePruProgram.prototype.LDI = function (dest, op) { this.emitInstr("LDI", [dest, op]); };
+    BasePruProgram.prototype.LBBO = function (srcReg, addrReg, addrOffset, byteCount) {
+        this.emitInstr("LBBO", [srcReg, addrReg, addrOffset, byteCount], (addrOffset == 0 && byteCount == 4)
+            ? ("store the value of " + srcReg + " into &" + addrReg)
+            : ("store " + byteCount + " bytes into " + addrReg + " + " + addrOffset + " from registers starting at " + srcReg));
+    };
+    BasePruProgram.prototype.SBBO = function (destReg, addrReg, addrOffset, byteCount) {
+        this.emitInstr("SBBO", [destReg, addrReg, addrOffset, byteCount], "copy " + byteCount + " bytes from " + addrReg + " + " + addrOffset + " into registers starting at " + destReg);
+    };
+    BasePruProgram.prototype.LBCO = function (dest, constName, addrOffset, byteCount) { this.emitInstr("LBCO", [dest, constName, addrOffset, byteCount]); };
+    BasePruProgram.prototype.SBCO = function (dest, constName, addrOffset, byteCount) { this.emitInstr("SBCO", [dest, constName, addrOffset, byteCount]); };
+    // protected LFC()  { this.emitInstr("LFC", arguments);  } // Deprecated
+    // protected STC()  { this.emitInstr("STC", arguments);  } // Deprecated
+    BasePruProgram.prototype.ZERO = function (startReg, byteCount) { this.emitInstr("ZERO", [startReg, byteCount]); };
+    //protected MVIB() { this.emitInstr("MVIB", arguments); }
+    //protected MVIW() { this.emitInstr("MVIW", arguments); }
+    //protected MVID() { this.emitInstr("MVID", arguments); }
+    BasePruProgram.prototype.JMP = function (label) { this.emitInstr("JMP", [label]); };
+    BasePruProgram.prototype.JAL = function (reg, label) { this.emitInstr("JAL", [reg, label]); };
+    BasePruProgram.prototype.CALL = function (label) { this.emitInstr("CALL", [label]); };
+    BasePruProgram.prototype.RET = function () { this.emitInstr("RET", []); };
+    BasePruProgram.prototype.QBGT = function (label, reg, op) { this.emitInstr("QBGT", [label, reg, op]); };
+    BasePruProgram.prototype.QBGE = function (label, reg, op) { this.emitInstr("QBGE", [label, reg, op]); };
+    BasePruProgram.prototype.QBLT = function (label, reg, op) { this.emitInstr("QBLT", [label, reg, op]); };
+    BasePruProgram.prototype.QBLE = function (label, reg, op) { this.emitInstr("QBLE", [label, reg, op]); };
+    BasePruProgram.prototype.QBEQ = function (label, reg, op) { this.emitInstr("QBEQ", [label, reg, op]); };
+    BasePruProgram.prototype.QBNE = function (label, reg, op) { this.emitInstr("QBNE", [label, reg, op]); };
+    BasePruProgram.prototype.QBA = function (label) { this.emitInstr("QBA", [label]); };
+    BasePruProgram.prototype.QBBS = function (label, reg, bit) {
+        this.emitInstr("QBBS", [label, reg, bit], "if (" + reg + " & (1 << " + bit + ") != 0) goto " + label);
+    };
+    BasePruProgram.prototype.QBBC = function (label, reg, bit) {
+        this.emitInstr("QBBC", [label, reg, bit], "if (" + reg + " & (1 << " + bit + ") == 0) goto " + label);
+    };
+    BasePruProgram.prototype.WBS = function (reg, bit) { this.emitInstr("WBS", [reg, bit]); };
+    BasePruProgram.prototype.WBC = function (reg, bit) { this.emitInstr("WBC", [reg, bit]); };
+    BasePruProgram.prototype.HALT = function () { this.emitInstr("HALT", []); };
+    BasePruProgram.prototype.SLP = function () { this.emitInstr("SLP", []); };
+    BasePruProgram.prototype.ST32 = function (src, dst) { this.emitInstr("ST32", [src, dst]); };
+    BasePruProgram.prototype.NOP = function () { this.MOV(this.r0, this.r0); };
+    BasePruProgram.prototype.DECREMENT = function (r) { this.emitInstr("DECREMENT", [r], r + " --"); };
+    BasePruProgram.prototype.RESET_COUNTER = function () { this.emitInstr("RESET_COUNTER", []); };
+    BasePruProgram.prototype.RAISE_ARM_INTERRUPT = function () { this.emitInstr("RAISE_ARM_INTERRUPT", []); };
+    BasePruProgram.prototype.WAITNS = function (waitNs, waitLabel) { this.emitInstr("WAITNS", [waitNs, waitLabel || this.nextLabel("waitNs")]); };
+    BasePruProgram.prototype.WAIT_TIMEOUT = function (timeoutNs, timeoutLabel) { this.emitInstr("WAIT_TIMEOUT", [timeoutNs, timeoutLabel]); };
+    BasePruProgram.prototype.SLEEPNS = function (sleepNs, sleepLabel) { this.emitInstr("SLEEPNS", [sleepNs, 0, sleepLabel || this.nextLabel("sleepNs")]); };
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    BasePruProgram.prototype.INIT_PRU = function () {
+        var g = this;
+        g.emitLine("#define PRU" + this.PRU_NUM);
+        g.emitLine('#include "common.p.h"');
+        g.emitComment("Intialize the PRU");
+        g.emitLine("START:");
+        g.emitComment('Enable OCP master port');
+        g.emitComment('clear the STANDBY_INIT bit in the SYSCFG register,');
+        g.emitComment('otherwise the PRU will not be able to write outside the');
+        g.emitComment('PRU memory space and to the BeagleBone\'s pins.');
+        g.LBCO(g.r0, g.C4, 4, 4);
+        g.CLR(g.r0, g.r0, 4);
+        g.SBCO(g.r0, g.C4, 4, 4);
+        g.emitComment('Configure the programmable pointer register for PRU0 by setting');
+        g.emitComment('c28_pointer[15:0] field to 0x0120.  This will make C28 point to');
+        g.emitComment('0x00012000 (PRU shared RAM).');
+        g.MOV(g.r0, '0x00000120');
+        g.MOV(g.r1, g.CTPPR_0);
+        g.ST32(g.r0, g.r1);
+        g.emitComment('Configure the programmable pointer register for PRU0 by setting');
+        g.emitComment('c31_pointer[15:0] field to 0x0010.  This will make C31 point to');
+        g.emitComment('0x80001000 (DDR memory).');
+        g.MOV(g.r0, '0x00100000');
+        g.MOV(g.r1, g.CTPPR_1);
+        g.ST32(g.r0, g.r1);
+        g.emitComment('Write a 0x1 into the response field so that they know we have started');
+        g.MOV(g.r2, 1);
+        g.SBCO(g.r2, g.CONST_PRUDRAM, 12, 4);
+        g.MOV(g.r20, '0xFFFFFFFF');
+    };
+    BasePruProgram.prototype.PREP_GPIO_FOR_CLEAR = function (gpioBank) {
+        this.emitComment("Prep GPIO address register for CLEAR on GPIO bank " + gpioBank);
+        this.MOV(this.r_temp_addr, this.GPIO_ADDRS[gpioBank] | this.GPIO_CLEARDATAOUT);
+        this.lastGpioPrepBank = gpioBank;
+    };
+    BasePruProgram.prototype.PREP_GPIO_FOR_SET = function (gpioBank) {
+        this.emitComment("Prep GPIO address register for SET on GPIO bank " + gpioBank);
+        this.MOV(this.r_temp_addr, this.GPIO_ADDRS[gpioBank] | this.GPIO_SETDATAOUT);
+        this.lastGpioPrepBank = gpioBank;
+    };
+    BasePruProgram.prototype.APPLY_GPIO_CHANGES = function (maskReg) {
+        if (maskReg === void 0) { maskReg = this.r_temp1; }
+        this.emitComment("Apply GPIO bank " + this.lastGpioPrepBank + " changes");
+        this.SBBO(maskReg, this.r_temp_addr, 0, 4);
+    };
+    /**
+     * Zeros the registers used to store which bits should be one for each GPIO bank
+     */
+    BasePruProgram.prototype.RESET_GPIO_MASK = function () {
+        this.emitComment("Reset GPIO one registers");
+        this.MOV(this.r_temp1, 0);
+    };
+    /**
+     * Checks if the bit indexed by the r_bit_num register in the regN register is a zero, and if so, sets the bit in the
+     * corresponding _zeros register. CHANNEL_BANK_NAME and CHANNEL_BIT are used to lookup the bank and bit num.
+     *
+     * @param pin The pin whose bit should be tested
+     * @param gpioReg Register where the GPIO bit should be set.
+     */
+    BasePruProgram.prototype.TEST_BIT_ZERO = function (pin, gpioReg) {
+        if (gpioReg === void 0) { gpioReg = this.r_temp1; }
+        var label_name = "channel_" + pin.pruDataChannel + "_zero_skip";
+        this.emitComment("Test if pin (pruDataChannel=" + pin.pruDataChannel + ", global=" + pin.dataChannelIndex + ") is ZERO and SET bit " + pin.gpioBit + " in GPIO" + pin.gpioBank + " register");
+        this.QBBS(label_name, this.r_datas[pin.pruDataChannel], this.r_bit_num);
+        this.SET(gpioReg, gpioReg, pin.gpioBit);
+        this.emitLabel(label_name, true);
+    };
+    /**
+     * Checks if the bit indexed by the r_bit_num register in the regN register is a one, and if so, sets the bit in the
+     * corresponding _ones register. CHANNEL_BANK_NAME and CHANNEL_BIT are used to lookup the bank and bit num.
+     *
+     * @param pin The pin whose bit should be tested
+     * @param gpioReg Register where the GPIO bit should be set.
+     */
+    BasePruProgram.prototype.TEST_BIT_ONE = function (pin, gpioReg) {
+        if (gpioReg === void 0) { gpioReg = this.r_temp1; }
+        var label_name = "channel_" + pin.pruDataChannel + "_one_skip";
+        this.emitComment("Test if pin (pruDataChannel=" + pin.pruDataChannel + ", global=" + pin.dataChannelIndex + ") is ONE and SET bit " + pin.gpioBit + " in GPIO" + pin.gpioBank + " register");
+        this.QBBC(label_name, this.r_datas[pin.pruDataChannel], this.r_bit_num);
+        this.SET(gpioReg, gpioReg, pin.gpioBit);
+        this.emitLabel(label_name, true);
+    };
+    BasePruProgram.prototype.shortNameForPin = function (pin) {
+        return pin.mappedChannelIndex >= 0 ? pin.mappedChannelIndex : pin.gpioFullName;
+    };
+    BasePruProgram.prototype.LOAD_CHANNEL_DATA = function (firstPin, firstChannel, channelCount) {
+        this.emitComment("Load the data address from the constant table");
+        this.LBCO(this.r_temp_addr, this.CONST_PRUDRAM, 0, 4);
+        this.emitComment("Load " + channelCount + " channels of data into data registers");
+        this.LBBO(this.r_data0, this.r_temp_addr, firstPin.dataChannelIndex * 4 + firstChannel * 4, channelCount * 4);
+    };
+    BasePruProgram.prototype.PREP_GPIO_MASK_FOR_PINS = function (pins) {
+        this.emitComment("Set the GPIO (bank " + pins[0].gpioBank + ") mask register for setting or clearing channels " + pins.map(this.shortNameForPin).join(", "));
+        var mask = 0;
+        var bank = -1;
+        pins.forEach(function (pin) {
+            if (bank != -1 && bank != pin.gpioBank) {
+                throw new Error("Cannot load mask for multiple GPIO banks: " + pins);
+            }
+            else {
+                bank = pin.gpioBank;
+            }
+            mask |= 1 << pin.gpioBit;
+        });
+        this.MOV(this.r_temp1, this.toHexLiteral(mask));
+    };
+    BasePruProgram.prototype.groupByBank = function (allPins, callback) {
+        var _this = this;
+        var pinsByBank = [[], [], [], []];
+        allPins.forEach(function (pin) {
+            pinsByBank[pin.gpioBank].push(pin);
+        });
+        var usedBanks = pinsByBank.filter(function (bankPins) { return bankPins.length > 0; });
+        var multipleBanksUsed = usedBanks.length > 1;
+        var usedBankIndex = 0;
+        pinsByBank.forEach(function (pins, bankIndex) {
+            if (pins.length > 0) {
+                if (multipleBanksUsed) {
+                    _this.pruBlock("Bank " + bankIndex, function () { return callback(pins, bankIndex, usedBankIndex++, usedBanks.length); });
+                }
+                else {
+                    callback(pins, bankIndex, usedBankIndex++, usedBanks.length);
+                }
+            }
+        });
+    };
+    BasePruProgram.prototype.PINS_HIGH = function (pins, pinsLabel) {
+        var _this = this;
+        this.emitComment((pinsLabel || "") + ' Pins HIGH: ' + pins.map(this.shortNameForPin).join(", "));
+        this.pruBlock(function () {
+            _this.groupByBank(pins, function (pins, gpioBank) {
+                _this.PREP_GPIO_FOR_SET(gpioBank);
+                _this.PREP_GPIO_MASK_FOR_PINS(pins);
+                _this.APPLY_GPIO_CHANGES();
+            });
+        });
+    };
+    BasePruProgram.prototype.PINS_LOW = function (pins, pinsLabel) {
+        var _this = this;
+        this.emitComment((pinsLabel || "") + ' Pins LOW: ' + pins.map(this.shortNameForPin).join(", "));
+        this.pruBlock(function () {
+            _this.groupByBank(pins, function (pins, gpioBank) {
+                _this.PREP_GPIO_FOR_CLEAR(gpioBank);
+                _this.PREP_GPIO_MASK_FOR_PINS(pins);
+                _this.APPLY_GPIO_CHANGES();
+            });
+        });
+    };
+    BasePruProgram.prototype.PINS_HIGH_LOW = function (pins, pinsLabel) {
+        var _this = this;
+        this.emitComment((pinsLabel || "") + ' Pins HIGH-LOW pulse: ' + pins.map(this.shortNameForPin).join(", "));
+        this.pruBlock(function () {
+            _this.groupByBank(pins, function (pins, gpioBank) {
+                _this.PREP_GPIO_MASK_FOR_PINS(pins);
+                _this.PREP_GPIO_FOR_SET(gpioBank);
+                _this.APPLY_GPIO_CHANGES();
+                _this.PREP_GPIO_FOR_CLEAR(gpioBank);
+                _this.APPLY_GPIO_CHANGES();
+            });
+        });
+    };
+    return BasePruProgram;
+})();
+exports.BasePruProgram = BasePruProgram;
+var BaseSetupPruProgram = (function (_super) {
+    __extends(BaseSetupPruProgram, _super);
+    function BaseSetupPruProgram(PRU_NUM, overallChannelCount) {
+        _super.call(this, PRU_NUM);
+        this.overallChannelCount = overallChannelCount;
+    }
+    BaseSetupPruProgram.prototype.generate = function () {
+        var g = this;
+        this.fileHeader();
+        g.INIT_PRU();
+        g.RESET_COUNTER();
+        var _exit = "EXIT";
+        g.emitComment("Wait for the start condition from the main program to indicate");
+        g.emitComment("that we have a rendered frame ready to clock out.  This also");
+        g.emitComment("handles the exit case if an invalid value is written to the start");
+        g.emitComment("start position.");
+        var l_main_loop = g.emitLabel("main_loop");
+        g.SLEEPNS(7000, "frame_break");
+        g.emitComment("Let ledscape know that we're starting the loop again. It waits for this");
+        g.emitComment("interrupt before sending another frame");
+        g.RAISE_ARM_INTERRUPT();
+        g.emitComment("Load the pointer to the buffer from PRU DRAM into r0 and the");
+        g.emitComment("length (in bytes-bit words) into r1.");
+        g.emitComment("start command into r2");
+        g.LBCO(g.r_data_addr, g.CONST_PRUDRAM, 0, 12);
+        g.emitComment("Wait for a non-zero command");
+        g.QBEQ(l_main_loop, g.r2, 0);
+        g.emitComment("Zero out the start command so that they know we have received it");
+        g.emitComment("This allows maximum speed frame drawing since they know that they");
+        g.emitComment("can now swap the frame buffer pointer and write a new start command.");
+        g.MOV(g.r3, 0);
+        g.SBCO(g.r3, g.CONST_PRUDRAM, 8, 4);
+        g.emitComment("Command of 0xFF is the signal to exit");
+        g.QBEQ(_exit, g.r2, 0xFF);
+        g.emitComment("Reset the sleep timer");
+        g.RESET_COUNTER();
+        this.frameCode();
+        // Write out that we are done!
+        // Store a non-zero response in the buffer so that they know that we are done
+        // aso a quick hack, we write the counter so that we know how
+        // long it took to write out.
+        g.MOV(g.r8, g.PRU_CONTROL_ADDRESS); // control register
+        g.LBBO(g.r2, g.r8, 0xC, 4);
+        g.SBCO(g.r2, g.CONST_PRUDRAM, 12, 4);
+        // Go back to waiting for the next frame buffer
+        g.RESET_COUNTER();
+        g.QBA(l_main_loop);
+        g.emitLabel(_exit);
+        // Write a 0xFF into the response field so that they know we're done
+        g.MOV(g.r2, 0xFF);
+        g.SBCO(g.r2, g.CONST_PRUDRAM, 12, 4);
+        g.RAISE_ARM_INTERRUPT();
+        g.HALT();
+        return _super.prototype.generate.call(this);
+    };
+    return BaseSetupPruProgram;
+})(BasePruProgram);
+exports.BaseSetupPruProgram = BaseSetupPruProgram;
+//# sourceMappingURL=common.js.map

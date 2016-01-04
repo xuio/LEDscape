@@ -1,0 +1,31 @@
+{
+  "name": "ledscape-pru-helper",
+  "version": "1.0.0",
+  "dependencies": {
+    "cuint": {
+      "version": "0.2.0",
+      "from": "cuint@latest",
+      "resolved": "https://registry.npmjs.org/cuint/-/cuint-0.2.0.tgz"
+    },
+    "shelljs": {
+      "version": "0.5.3",
+      "from": "shelljs@0.5.3",
+      "resolved": "https://registry.npmjs.org/shelljs/-/shelljs-0.5.3.tgz"
+    },
+    "strip-json-comments": {
+      "version": "2.0.0",
+      "from": "strip-json-comments@2.0.0",
+      "resolved": "https://registry.npmjs.org/strip-json-comments/-/strip-json-comments-2.0.0.tgz"
+    },
+    "typescript": {
+      "version": "1.7.5",
+      "from": "typescript@>=1.7.5 <2.0.0",
+      "resolved": "https://registry.npmjs.org/typescript/-/typescript-1.7.5.tgz"
+    },
+    "xxhashjs": {
+      "version": "0.1.1",
+      "from": "xxhashjs@*",
+      "resolved": "https://registry.npmjs.org/xxhashjs/-/xxhashjs-0.1.1.tgz"
+    }
+  }
+}

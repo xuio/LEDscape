@@ -2,7 +2,7 @@
 	"id": "rgb-123-v3",
 	"name": "RGB-123 v3",
 	"description": "RGB-123 version 3 mapping",
-	"cape-support": [
+	"capeSupport": [
 		{ "org": "rgb-123", "id": "RJ45CapeC2" }
 	],
   "mappedPinNumberToPinDesignator": {

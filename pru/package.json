@@ -3,12 +3,13 @@
   "version": "1.0.0",
   "description": "Utility for dynamically building PRU programs for use with LEDscape",
   "main": "pinmap.js",
+  "repository": "https://github.com/Yona-Appletree/LEDscape",
   "dependencies": {
     "shelljs": "^0.5.3",
     "strip-json-comments": "^2.0.0",
-    "xxhashjs": "^0.1.1"
+    "xxhashjs": "^0.1.1",
+    "typescript": "^1.7.5"
   },
-  "devDependencies": {},
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },

@@ -2,7 +2,7 @@
 	"id": "rgb-123-v2",
 	"name": "RGB-123 v2",
 	"description": "RGB-123 version 2 mapping",
-	"cape-support": [
+	"capeSupport": [
 		{ "org": "rgb-123", "id": "RGBCape24C" },
 		{ "org": "rgb-123", "id": "RGBCape48C" }
 	],

@@ -7,23 +7,22 @@ TARGETS += opc-server
 LEDSCAPE_OBJS = ledscape.o pru.o util.o lib/cesanta/frozen.o lib/cesanta/mongoose.o
 LEDSCAPE_LIB := libledscape.a
 
-PRU_TEMPLATES := $(wildcard pru/templates/*.p)
-EXPANDED_PRU_TEMPLATES := $(addprefix pru/generated/, $(notdir $(PRU_TEMPLATES:.p=.template)))
+pru-js: npm-install typescript-compile
 
-all: $(TARGETS) ledscape.service
+all: $(TARGETS) pru-js ledscape.service
 
 ifeq ($(shell uname -m),armv7l)
-# We are on the BeagleBone Black itself;
-# do not cross compile.
-export CROSS_COMPILE:=
+	# We are on the BeagleBone Black itself;
+	# do not cross compile.
+	export CROSS_COMPILE:=
 else
-# We are not on the BeagleBone and might be cross compiling.
-# If the environment does not set CROSS_COMPILE, set our
-# own.  Install a cross compiler with something like:
-#
-# sudo apt-get install gcc-arm-linux-gnueabi
-#
-export CROSS_COMPILE?=arm-linux-gnueabi-
+	# We are not on the BeagleBone and might be cross compiling.
+	# If the environment does not set CROSS_COMPILE, set our
+	# own.  Install a cross compiler with something like:
+	#
+	# sudo apt-get install gcc-arm-linux-gnueabi
+	#
+	export CROSS_COMPILE?=arm-linux-gnueabi-
 endif
 
 CFLAGS += \
@@ -63,34 +62,16 @@ APP_LOADER_LIB := $(APP_LOADER_DIR)/lib/libprussdrv.a
 CFLAGS += -I$(APP_LOADER_DIR)/include
 LDLIBS += $(APP_LOADER_LIB) -lm
 
-#####
-#
-# The TI PRU assembler looks like it has macros and includes,
-# but it really doesn't.  So instead we use cpp to pre-process the
-# file and then strip out all of the directives that it adds.
-# PASM also doesn't handle multiple statements per line, so we
-# insert hard newline characters for every ; in the file.
-#
-PASM_DIR ?= ./am335x/pasm
-PASM := $(PASM_DIR)/pasm
 
-pru/generated/%.template: pru/templates/%.p pru/templates/common.p.h
-	$(eval TEMPLATE_NAME := $(basename $(notdir $@)))
-	mkdir -p pru/generated
-	pru/build_template.sh $(TEMPLATE_NAME)
-	touch $@
-	$(MAKE) `ls pru/generated | egrep '^$(TEMPLATE_NAME).*\.p$$' | sed 's/.p$$/.bin/' | sed -E 's/(.*)/pru\/generated\/\1/'`
+npm-install:
+	cd pru; npm install
 
-all_pru_templates: $(EXPANDED_PRU_TEMPLATES)
-
-%.bin: %.p $(PASM)
-	mkdir -p pru/bin
-	cd `dirname $@` && gcc -E - < $(notdir $<) | perl -p -e 's/^#.*//; s/;/\n/g; s/BYTE\((\d+)\)/t\1/g' > $(notdir $<).i
-	$(PASM) -V3 -b $<.i pru/bin/$(notdir $(basename $@))
-	#$(RM) $<.i
+typescript-compile:
+	cd pru; echo "Compiling Typescript..."; node_modules/typescript/bin/tsc --diagnostics
 
 %.o: %.c
 	$(COMPILE.o)
+
 
 libledscape.a: $(LEDSCAPE_OBJS)
 	$(RM) $@
