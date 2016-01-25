@@ -7,7 +7,7 @@ TARGETS += opc-server
 LEDSCAPE_OBJS = ledscape.o pru.o util.o lib/cesanta/frozen.o lib/cesanta/mongoose.o
 LEDSCAPE_LIB := libledscape.a
 
-all: $(TARGETS) pru-js ledscape.service
+all: pasm $(TARGETS) pru-js ledscape.service
 
 # Used to include npm-install, but now they're checked in
 pru-js: typescript-compile
@@ -50,6 +50,8 @@ APP_LOADER_DIR ?= ./am335x/app_loader
 APP_LOADER_LIB := $(APP_LOADER_DIR)/lib/libprussdrv.a
 CFLAGS += -I$(APP_LOADER_DIR)/include
 LDLIBS += $(APP_LOADER_LIB) -lm
+
+PASM_DIR = ./am335x/pasm
 
 
 npm-install:
@@ -122,7 +124,7 @@ dts: LEDscape.dts
 $(APP_LOADER_LIB):
 	$(MAKE) -C $(APP_LOADER_DIR)/interface
 
-$(PASM):
+pasm:
 	$(MAKE) -C $(PASM_DIR)
 
 # Include all of the generated dependency files
