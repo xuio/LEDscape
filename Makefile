@@ -7,10 +7,10 @@ TARGETS += opc-server
 LEDSCAPE_OBJS = ledscape.o pru.o util.o lib/cesanta/frozen.o lib/cesanta/mongoose.o
 LEDSCAPE_LIB := libledscape.a
 
+all: $(TARGETS) pru-js ledscape.service
+
 # Used to include npm-install, but now they're checked in
 pru-js: typescript-compile
-
-all: $(TARGETS) pru-js ledscape.service
 
 ifeq ($(shell uname -m),armv7l)
 	# We are on the BeagleBone Black itself;
