@@ -7,7 +7,8 @@ TARGETS += opc-server
 LEDSCAPE_OBJS = ledscape.o pru.o util.o lib/cesanta/frozen.o lib/cesanta/mongoose.o
 LEDSCAPE_LIB := libledscape.a
 
-pru-js: npm-install typescript-compile
+# Used to include npm-install, but now they're checked in
+pru-js: typescript-compile
 
 all: $(TARGETS) pru-js ledscape.service
 
@@ -101,7 +102,12 @@ clean:
 		lib/cesanta/*.o \
 		pru/generated \
 		pru/bin \
-		ledscape.service
+		ledscape.service \
+		pru/*.js \
+		pru/*.js.map \
+		pru/jstemplates/*.js \
+        pru/jstemplates/*.js.map \
+		pru/tmp
 	cd am335x/app_loader/interface && $(MAKE) clean
 	cd am335x/pasm && $(MAKE) clean
 
