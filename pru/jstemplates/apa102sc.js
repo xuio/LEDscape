@@ -80,7 +80,7 @@ var Apa102SharedClock = (function (_super) {
                     g.PREP_GPIO_FOR_SET(gpioBank);
                     g.APPLY_GPIO_CHANGES();
                     if (usedBank == 0) {
-                        // Clock LOW, AFTER we set the data... this dirties our bit.
+                        // Clock LOW, AFTER we set the data... this dirties the temp reg.
                         _this.CLOCK_LOW();
                     }
                 });
