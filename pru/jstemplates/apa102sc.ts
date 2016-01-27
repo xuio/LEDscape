@@ -105,14 +105,14 @@ export default class Apa102SharedClock extends BaseSetupPruProgram {
 						g.TEST_BIT_ONE(pin);
 					});
 
-					if (usedBank == 0) {
-						// Clock LOW
-						this.CLOCK_LOW();
-					}
-
 					// Apply the changes
 					g.PREP_GPIO_FOR_SET(gpioBank);
 					g.APPLY_GPIO_CHANGES();
+
+					if (usedBank == 0) {
+						// Clock LOW, AFTER we set the data... this dirties the temp reg.
+						this.CLOCK_LOW();
+					}
 				});
 
 

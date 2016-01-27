@@ -76,13 +76,13 @@ var Apa102SharedClock = (function (_super) {
                     pins.forEach(function (pin) {
                         g.TEST_BIT_ONE(pin);
                     });
-                    if (usedBank == 0) {
-                        // Clock LOW
-                        _this.CLOCK_LOW();
-                    }
                     // Apply the changes
                     g.PREP_GPIO_FOR_SET(gpioBank);
                     g.APPLY_GPIO_CHANGES();
+                    if (usedBank == 0) {
+                        // Clock LOW, AFTER we set the data... this dirties our bit.
+                        _this.CLOCK_LOW();
+                    }
                 });
                 g.QBNE(l_bit_loop, g.r_bit_num, 0);
             });

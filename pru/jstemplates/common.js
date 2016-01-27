@@ -308,7 +308,7 @@ var BasePruProgram = (function () {
             : ("store " + byteCount + " bytes into " + addrReg + " + " + addrOffset + " from registers starting at " + srcReg));
     };
     BasePruProgram.prototype.SBBO = function (destReg, addrReg, addrOffset, byteCount) {
-        this.emitInstr("SBBO", [destReg, addrReg, addrOffset, byteCount], "copy " + byteCount + " bytes from " + addrReg + " + " + addrOffset + " into registers starting at " + destReg);
+        this.emitInstr("SBBO", [destReg, addrReg, addrOffset, byteCount], "copy " + byteCount + " bytes into *(" + addrReg + " + " + addrOffset + ") from registers starting at " + destReg);
     };
     BasePruProgram.prototype.LBCO = function (dest, constName, addrOffset, byteCount) { this.emitInstr("LBCO", [dest, constName, addrOffset, byteCount]); };
     BasePruProgram.prototype.SBCO = function (dest, constName, addrOffset, byteCount) { this.emitInstr("SBCO", [dest, constName, addrOffset, byteCount]); };

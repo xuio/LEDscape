@@ -177,7 +177,7 @@ export abstract class BasePruProgram {
 		this.emitInstr(
 			"SBBO",
 			[ destReg, addrReg, addrOffset, byteCount ],
-			"copy " + byteCount + " bytes from " + addrReg + " + " + addrOffset + " into registers starting at " + destReg
+			"copy " + byteCount + " bytes into *(" + addrReg + " + " + addrOffset + ") from registers starting at " + destReg
 		);
 	}
 	protected LBCO(dest: PruRegister, constName: string, addrOffset: number, byteCount: number) { this.emitInstr("LBCO", [ dest, constName, addrOffset, byteCount ]); }
@@ -476,6 +476,7 @@ export abstract class BasePruProgram {
 		var label_name = "channel_" + pin.pruDataChannel + "_one_skip";
 
 		this.emitComment("Test if pin (pruDataChannel=" + pin.pruDataChannel + ", global="+pin.dataChannelIndex+") is ONE and SET bit " + pin.gpioBit + " in GPIO" + pin.gpioBank + " register");
+
 		this.QBBC(label_name, this.r_datas[pin.pruDataChannel], this.r_bit_num);
 		this.SET(gpioReg, gpioReg, pin.gpioBit);
 		this.emitLabel(label_name, true);
@@ -531,7 +532,7 @@ export abstract class BasePruProgram {
 			pinsByBank[pin.gpioBank].push(pin);
 		});
 
-		var usedBanks = pinsByBank.filter((bankPins) => { return bankPins.length > 0 });
+		var usedBanks = pinsByBank.filter(bankPins => bankPins.length > 0);
 		var multipleBanksUsed = usedBanks.length > 1;
 
 		var usedBankIndex = 0;
