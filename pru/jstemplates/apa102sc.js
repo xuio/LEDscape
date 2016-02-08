@@ -61,6 +61,9 @@ var Apa102SharedClock = (function (_super) {
             // for bit in 24 to 0
             g.emitComment("Loop over the 24 bits in a word");
             g.MOV(g.r_bit_num, 24);
+            // Small Delay to allow the first clock to be long enough
+            g.NOP();
+            g.NOP();
             g.pruBlock(function () {
                 var l_bit_loop = "l_bit_loop";
                 g.emitLabel(l_bit_loop);
@@ -80,10 +83,12 @@ var Apa102SharedClock = (function (_super) {
                     g.PREP_GPIO_FOR_SET(gpioBank);
                     g.APPLY_GPIO_CHANGES();
                     if (usedBank == 0) {
-                        // Clock LOW, AFTER we set the data... this dirties the temp reg.
-                        _this.CLOCK_LOW();
                     }
                 });
+                g.CLOCK_LOW();
+                // Small wait to ensure clock pulse is long enough
+                g.NOP();
+                g.NOP();
                 g.QBNE(l_bit_loop, g.r_bit_num, 0);
             });
             // Clock pulse for final bit

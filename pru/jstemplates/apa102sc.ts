@@ -85,6 +85,10 @@ export default class Apa102SharedClock extends BaseSetupPruProgram {
 			g.emitComment("Loop over the 24 bits in a word");
 			g.MOV(g.r_bit_num, 24);
 
+			// Small Delay to allow the first clock to be long enough
+			g.NOP();
+			g.NOP();
+
 			g.pruBlock(() => {
 				var l_bit_loop = "l_bit_loop";
 				g.emitLabel(l_bit_loop);
@@ -111,10 +115,14 @@ export default class Apa102SharedClock extends BaseSetupPruProgram {
 
 					if (usedBank == 0) {
 						// Clock LOW, AFTER we set the data... this dirties the temp reg.
-						this.CLOCK_LOW();
+						// this.CLOCK_LOW();
 					}
 				});
 
+				g.CLOCK_LOW();
+				// Small wait to ensure clock pulse is long enough
+				g.NOP();
+				g.NOP();
 
 				g.QBNE(l_bit_loop, g.r_bit_num, 0);
 			});
