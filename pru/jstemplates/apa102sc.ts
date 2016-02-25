@@ -73,10 +73,13 @@ export default class Apa102SharedClock extends BaseSetupPruProgram {
 				var l_header_bit_loop = g.emitLabel("l_header_bit_loop");
 				g.DECREMENT(g.r_bit_num);
 
-				g.CLOCK_PULSE(5);
+				g.CLOCK_PULSE(3);
 
 				g.QBNE(l_header_bit_loop, g.r_bit_num, 0);
 			});
+
+			// Bring clock back down after brightness block
+			g.CLOCK_LOW();
 
 			// Load all the data.
 			g.LOAD_CHANNEL_DATA(g.pruPins[0], 0, g.pruChannelCount);
@@ -95,7 +98,7 @@ export default class Apa102SharedClock extends BaseSetupPruProgram {
 				g.DECREMENT(g.r_bit_num);
 
 				// Send the previous bits (including the last 1 bit for the 8-bit preamble)
-				this.CLOCK_HIGH();
+				g.CLOCK_HIGH();
 
 				g.groupByBank(g.pruPins, (pins, gpioBank, usedBank) => {
 					// Bring all data low for this bank
@@ -113,22 +116,15 @@ export default class Apa102SharedClock extends BaseSetupPruProgram {
 					g.PREP_GPIO_FOR_SET(gpioBank);
 					g.APPLY_GPIO_CHANGES();
 
-					if (usedBank == 0) {
-						// Clock LOW, AFTER we set the data... this dirties the temp reg.
-						// this.CLOCK_LOW();
-					}
 				});
 
-				g.CLOCK_LOW();
-				// Small wait to ensure clock pulse is long enough
-				g.NOP();
-				g.NOP();
+				g.CLOCK_LOW(5);
 
 				g.QBNE(l_bit_loop, g.r_bit_num, 0);
 			});
 
 			// Clock pulse for final bit
-			g.CLOCK_PULSE(5);
+			g.CLOCK_HIGH();
 
 			// The RGB streams have been clocked out
 			// Move to the next pixel on each row
@@ -164,6 +160,7 @@ export default class Apa102SharedClock extends BaseSetupPruProgram {
 			});
 
 			this.DATAS_LOW();
+			this.CLOCK_LOW();
 		});
 	}
 
@@ -195,41 +192,49 @@ export default class Apa102SharedClock extends BaseSetupPruProgram {
 		);
 	}
 
-	private CLOCK_HIGH() {
+	private CLOCK_HIGH(delay = 0) {
 		this.pruBlock(
 			"Bring Clock High",
 			() => {
+				var reps = Math.ceil(delay/2) || 1;
+
 				this.PREP_GPIO_FOR_SET(this.clockPin.gpioBank);
 				this.PREP_GPIO_MASK_FOR_PINS([this.clockPin]);
-				this.APPLY_GPIO_CHANGES();
+
+				for (var i=0; i<reps; i++)
+					this.APPLY_GPIO_CHANGES();
 			}
 		);
 	}
 
-	private CLOCK_LOW() {
+	private CLOCK_LOW(delay = 0) {
 		this.pruBlock(
 			"Bring Clock Low",
 			() => {
+				var reps = Math.ceil(delay/2) || 1;
+
 				this.PREP_GPIO_FOR_CLEAR(this.clockPin.gpioBank);
 				this.PREP_GPIO_MASK_FOR_PINS([this.clockPin]);
-				this.APPLY_GPIO_CHANGES();
+
+				for (var i=0; i<reps; i++)
+					this.APPLY_GPIO_CHANGES();
 			}
 		);
 	}
 
 	private CLOCK_PULSE(delay = 0) {
 		this.pruBlock(
-			"Pulse Clock HIGH-LOW",
+			"Pulse Clock LOW-HIGH",
 			() => {
 				var reps = Math.ceil(delay/2) || 1;
-
-				this.PREP_GPIO_FOR_SET(this.clockPin.gpioBank);
 				this.PREP_GPIO_MASK_FOR_PINS([this.clockPin]);
+
+				this.PREP_GPIO_FOR_CLEAR(this.clockPin.gpioBank);
 				for (var i=0; i<reps; i++) {
 					this.APPLY_GPIO_CHANGES();
 				}
 
-				this.PREP_GPIO_FOR_CLEAR(this.clockPin.gpioBank);
+				this.PREP_GPIO_FOR_SET(this.clockPin.gpioBank);
 				for (var i=0; i<reps; i++) {
 					this.APPLY_GPIO_CHANGES();
 				}

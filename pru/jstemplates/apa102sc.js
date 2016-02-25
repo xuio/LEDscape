@@ -53,9 +53,11 @@ var Apa102SharedClock = (function (_super) {
             g.pruBlock(function () {
                 var l_header_bit_loop = g.emitLabel("l_header_bit_loop");
                 g.DECREMENT(g.r_bit_num);
-                g.CLOCK_PULSE(5);
+                g.CLOCK_PULSE(3);
                 g.QBNE(l_header_bit_loop, g.r_bit_num, 0);
             });
+            // Bring clock back down after brightness block
+            g.CLOCK_LOW();
             // Load all the data.
             g.LOAD_CHANNEL_DATA(g.pruPins[0], 0, g.pruChannelCount);
             // for bit in 24 to 0
@@ -69,7 +71,7 @@ var Apa102SharedClock = (function (_super) {
                 g.emitLabel(l_bit_loop);
                 g.DECREMENT(g.r_bit_num);
                 // Send the previous bits (including the last 1 bit for the 8-bit preamble)
-                _this.CLOCK_HIGH();
+                g.CLOCK_HIGH();
                 g.groupByBank(g.pruPins, function (pins, gpioBank, usedBank) {
                     // Bring all data low for this bank
                     _this.DATAS_LOW(pins);
@@ -82,17 +84,12 @@ var Apa102SharedClock = (function (_super) {
                     // Apply the changes
                     g.PREP_GPIO_FOR_SET(gpioBank);
                     g.APPLY_GPIO_CHANGES();
-                    if (usedBank == 0) {
-                    }
                 });
-                g.CLOCK_LOW();
-                // Small wait to ensure clock pulse is long enough
-                g.NOP();
-                g.NOP();
+                g.CLOCK_LOW(5);
                 g.QBNE(l_bit_loop, g.r_bit_num, 0);
             });
             // Clock pulse for final bit
-            g.CLOCK_PULSE(5);
+            g.CLOCK_HIGH();
             // The RGB streams have been clocked out
             // Move to the next pixel on each row
             g.ADD(g.r_data_addr, g.r_data_addr, 48 * 4);
@@ -118,6 +115,7 @@ var Apa102SharedClock = (function (_super) {
                 g.QBNE(l_end_bit_loop, g.r_bit_num, 0);
             });
             _this.DATAS_LOW();
+            _this.CLOCK_LOW();
         });
     };
     Apa102SharedClock.prototype.DATAS_HIGH = function (pins) {
@@ -144,33 +142,39 @@ var Apa102SharedClock = (function (_super) {
             });
         });
     };
-    Apa102SharedClock.prototype.CLOCK_HIGH = function () {
+    Apa102SharedClock.prototype.CLOCK_HIGH = function (delay) {
         var _this = this;
+        if (delay === void 0) { delay = 0; }
         this.pruBlock("Bring Clock High", function () {
+            var reps = Math.ceil(delay / 2) || 1;
             _this.PREP_GPIO_FOR_SET(_this.clockPin.gpioBank);
             _this.PREP_GPIO_MASK_FOR_PINS([_this.clockPin]);
-            _this.APPLY_GPIO_CHANGES();
+            for (var i = 0; i < reps; i++)
+                _this.APPLY_GPIO_CHANGES();
         });
     };
-    Apa102SharedClock.prototype.CLOCK_LOW = function () {
+    Apa102SharedClock.prototype.CLOCK_LOW = function (delay) {
         var _this = this;
+        if (delay === void 0) { delay = 0; }
         this.pruBlock("Bring Clock Low", function () {
+            var reps = Math.ceil(delay / 2) || 1;
             _this.PREP_GPIO_FOR_CLEAR(_this.clockPin.gpioBank);
             _this.PREP_GPIO_MASK_FOR_PINS([_this.clockPin]);
-            _this.APPLY_GPIO_CHANGES();
+            for (var i = 0; i < reps; i++)
+                _this.APPLY_GPIO_CHANGES();
         });
     };
     Apa102SharedClock.prototype.CLOCK_PULSE = function (delay) {
         var _this = this;
         if (delay === void 0) { delay = 0; }
-        this.pruBlock("Pulse Clock HIGH-LOW", function () {
+        this.pruBlock("Pulse Clock LOW-HIGH", function () {
             var reps = Math.ceil(delay / 2) || 1;
-            _this.PREP_GPIO_FOR_SET(_this.clockPin.gpioBank);
             _this.PREP_GPIO_MASK_FOR_PINS([_this.clockPin]);
+            _this.PREP_GPIO_FOR_CLEAR(_this.clockPin.gpioBank);
             for (var i = 0; i < reps; i++) {
                 _this.APPLY_GPIO_CHANGES();
             }
-            _this.PREP_GPIO_FOR_CLEAR(_this.clockPin.gpioBank);
+            _this.PREP_GPIO_FOR_SET(_this.clockPin.gpioBank);
             for (var i = 0; i < reps; i++) {
                 _this.APPLY_GPIO_CHANGES();
             }

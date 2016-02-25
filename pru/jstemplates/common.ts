@@ -487,13 +487,13 @@ export abstract class BasePruProgram {
 	}
 
 	protected LOAD_CHANNEL_DATA(firstPin: BbbPinInfo, firstChannel: number, channelCount: number) {
-		this.emitComment("Load the data address from the constant table");
-		this.LBCO(this.r_temp_addr, this.CONST_PRUDRAM, 0, 4);
+		//this.emitComment("Load the data address from the constant table");
+		//this.LBCO(this.r_temp_addr, this.CONST_PRUDRAM, 0, 4);
 
 		this.emitComment("Load " + channelCount + " channels of data into data registers");
 		this.LBBO(
 			this.r_data0,
-			this.r_temp_addr,
+			this.r_data_addr,
 			firstPin.dataChannelIndex*4 + firstChannel*4,
 			channelCount*4
 		);

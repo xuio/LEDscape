@@ -434,10 +434,10 @@ var BasePruProgram = (function () {
         return pin.mappedChannelIndex >= 0 ? pin.mappedChannelIndex : pin.gpioFullName;
     };
     BasePruProgram.prototype.LOAD_CHANNEL_DATA = function (firstPin, firstChannel, channelCount) {
-        this.emitComment("Load the data address from the constant table");
-        this.LBCO(this.r_temp_addr, this.CONST_PRUDRAM, 0, 4);
+        //this.emitComment("Load the data address from the constant table");
+        //this.LBCO(this.r_temp_addr, this.CONST_PRUDRAM, 0, 4);
         this.emitComment("Load " + channelCount + " channels of data into data registers");
-        this.LBBO(this.r_data0, this.r_temp_addr, firstPin.dataChannelIndex * 4 + firstChannel * 4, channelCount * 4);
+        this.LBBO(this.r_data0, this.r_data_addr, firstPin.dataChannelIndex * 4 + firstChannel * 4, channelCount * 4);
     };
     BasePruProgram.prototype.PREP_GPIO_MASK_FOR_PINS = function (pins) {
         this.emitComment("Set the GPIO (bank " + pins[0].gpioBank + ") mask register for setting or clearing channels " + pins.map(this.shortNameForPin).join(", "));
