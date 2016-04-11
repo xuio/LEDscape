@@ -1,8 +1,8 @@
 {
 	"outputMode": "apa102",
-	"outputMapping": "rgb-123-v2",
+	"outputMapping": "rgb-123-cape-48f",
 	"demoMode": "fade",
-	"ledsPerStrip": 128,
+	"ledsPerStrip": 256,
 	"usedStripCount": 48,
 	"colorChannelOrder": "BRG",
 	"opcTcpPort": 7890,
