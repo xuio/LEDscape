@@ -2,11 +2,7 @@
 	"id": "rgb-123-cape-24c,
 	"name": "RGB-123 RGBCape24C",
 	"description": "RMapping for RGB-123 Cape: RGBCape24C",
-	"capeSupport": [
-		{ "org": "rgb-123", "id": "RGBCape24C" },
-		{ "org": "rgb-123", "id": "RGBCape48C" }
-	],
-  "mappedPinNumberToPinDesignator": {
+	"mappedPinNumberToPinDesignator": {
 		"0": "P8_32", // GPIO0_11, UART5_RTSN
 		"1": "P8_30", // GPIO2_25, GPIO2_25
 		"2": "P8_18", // GPIO2_1, GPIO2_1
