@@ -48,6 +48,7 @@ var BasePruProgram = (function () {
         this.pruCode = "";
         this.pruWhitespace = [];
         this.labelCounter = 0;
+        this.currentWaitNs = 0;
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         this.r0 = new PruWholeRegister(0);
         this.r1 = new PruWholeRegister(1);
@@ -116,17 +117,19 @@ var BasePruProgram = (function () {
         ///////////////////////////////////////////////////////////////////////////////////
         // Temp and Control Registers
         this.r_data_addr = this.r0;
-        this.r_data_len = this.r1;
-        this.r_bit_num = this.r2.b0;
+        this.r_bit_num = this.r2.b2;
+        this.r_data_len = this.r2.w0;
         this.r_temp_addr = this.r3;
         this.r_temp1 = this.r4;
         this.r_temp2 = this.r29;
+        this.r_temp3 = this.r1;
+        this.r_temp4 = this.r30;
         this.r_data_len2 = this.r29.w0;
         this.r_bit_regs = [
-            this.r_temp1,
             this.r_data_addr,
             this.r_temp2,
-            this.r30
+            this.r_temp3,
+            this.r_temp4
         ];
         ///////////////////////////////////////////////////////////////////////////////////
         this.r_data0 = this.r5;
@@ -342,11 +345,37 @@ var BasePruProgram = (function () {
     BasePruProgram.prototype.ST32 = function (src, dst) { this.emitInstr("ST32", [src, dst]); };
     BasePruProgram.prototype.NOP = function () { this.MOV(this.r0, this.r0); };
     BasePruProgram.prototype.DECREMENT = function (r) { this.emitInstr("DECREMENT", [r], r + " --"); };
-    BasePruProgram.prototype.RESET_COUNTER = function () { this.emitInstr("RESET_COUNTER", []); };
+    BasePruProgram.prototype.RESET_COUNTER = function (tempReg) {
+        if (tempReg === void 0) { tempReg = this.r_temp1; }
+        this.currentWaitNs = 0;
+        // Disable the counter and clear it, then re-enable it
+        this.MOV(this.r_temp_addr, "PRU_CONTROL_ADDRESS"); // control register
+        this.LBBO(tempReg, this.r_temp_addr, 0, 4);
+        this.CLR(tempReg, tempReg, 3); // disable counter bit
+        this.SBBO(tempReg, this.r_temp_addr, 0, 4); // write it back
+        this.MOV(tempReg, 12);
+        this.SBBO(tempReg, this.r_temp_addr, 0x0C, 4); // clear the timer
+        this.LBBO(tempReg, this.r_temp_addr, 0, 4);
+        this.SET(tempReg, tempReg, 3); // enable counter bit
+        this.SBBO(tempReg, this.r_temp_addr, 0, 4); // write it back
+    };
     BasePruProgram.prototype.RAISE_ARM_INTERRUPT = function () { this.emitInstr("RAISE_ARM_INTERRUPT", []); };
-    BasePruProgram.prototype.WAITNS = function (waitNs, waitLabel) { this.emitInstr("WAITNS", [waitNs, waitLabel || this.nextLabel("waitNs")]); };
+    BasePruProgram.prototype.WAITNS_REL = function (waitNs, waitLabel) {
+        this.WAITNS(this.currentWaitNs += waitNs, waitLabel);
+    };
+    BasePruProgram.prototype.WAITNS = function (waitNs, waitLabel) {
+        this.emitLabel(waitLabel);
+        this.MOV(this.r_temp_addr, "PRU_CONTROL_ADDRESS");
+        this.LBBO(this.r_temp_addr, this.r_temp_addr, 0xC, 4);
+        this.QBGT(waitLabel, this.r_temp_addr, waitNs / 5);
+    };
     BasePruProgram.prototype.WAIT_TIMEOUT = function (timeoutNs, timeoutLabel) { this.emitInstr("WAIT_TIMEOUT", [timeoutNs, timeoutLabel]); };
-    BasePruProgram.prototype.SLEEPNS = function (sleepNs, sleepLabel) { this.emitInstr("SLEEPNS", [sleepNs, 0, sleepLabel || this.nextLabel("sleepNs")]); };
+    BasePruProgram.prototype.SLEEPNS = function (sleepNs, sleepLabel) {
+        this.MOV(this.r_temp_addr, sleepNs / 5 - 1);
+        this.emitLabel(sleepLabel);
+        this.SUB(this.r_temp_addr, this.r_temp_addr, 1);
+        this.QBNE(sleepLabel, this.r_temp_addr, 0);
+    };
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     BasePruProgram.prototype.INIT_PRU = function () {
         var g = this;
@@ -435,7 +464,7 @@ var BasePruProgram = (function () {
     };
     BasePruProgram.prototype.LOAD_CHANNEL_DATA = function (firstPin, firstChannel, channelCount) {
         //this.emitComment("Load the data address from the constant table");
-        //this.LBCO(this.r_temp_addr, this.CONST_PRUDRAM, 0, 4);
+        //this.LBCO(this.r_data_addr, this.CONST_PRUDRAM, 0, 4);
         this.emitComment("Load " + channelCount + " channels of data into data registers");
         this.LBBO(this.r_data0, this.r_data_addr, firstPin.dataChannelIndex * 4 + firstChannel * 4, channelCount * 4);
     };
@@ -548,6 +577,8 @@ var BaseSetupPruProgram = (function (_super) {
         g.QBEQ(_exit, g.r2, 0xFF);
         g.emitComment("Reset the sleep timer");
         g.RESET_COUNTER();
+        g.emitComment("Move the length into it's register");
+        g.MOV(g.r_data_len, g.r1);
         this.frameCode();
         // Write out that we are done!
         // Store a non-zero response in the buffer so that they know that we are done

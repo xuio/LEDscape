@@ -148,24 +148,6 @@
 // This busy waits for a given number of cycles.  Not for use
 // with things that must happen on a tight schedule.
 //
-.macro SLEEPNS
-.mparam ns,inst,lab
-	MOV r_sleep_counter, (ns/5)-1-inst // ws2811 -- high speed
-lab:
-	SUB r_sleep_counter, r_sleep_counter, 1
-	QBNE lab, r_sleep_counter, 0
-.endm
-
-
-// Wait for the cycle counter to reach a given value
-.macro WAITNS
-.mparam ns,lab
-	MOV r_temp_addr, PRU_CONTROL_ADDRESS // control register
-
-lab:
-	LBBO r_sleep_counter, r_temp_addr, 0xC, 2 // read the cycle counter
-	QBGT lab, r_sleep_counter, (ns)/5
-.endm
 
 // Used after WAITNS to jump to a label if too much time has elapsed
 .macro WAIT_TIMEOUT
@@ -173,26 +155,6 @@ lab:
     // Check that we haven't waited too long (waiting for memory, etc...) and if we have, jump to a timeout label
     MOV r_sleep_counter, (timeoutNs)/5
     QBGT timeoutLabel, r_sleep_counter, r_temp1
-.endm
-
-// Reset the cycle counter
-.macro RESET_COUNTER
-		// Disable the counter and clear it, then re-enable it
-		MOV r_temp_addr, PRU_CONTROL_ADDRESS // control register
-		LBBO r_temp1, r_temp_addr, 0, 4
-		CLR r_temp1, r_temp1, 3 // disable counter bit
-		SBBO r_temp1, r_temp_addr, 0, 4 // write it back
-
-		MOV r_temp1, 12
-		SBBO r_temp1, r_temp_addr, 0x0C, 4 // clear the timer
-
-		LBBO r_temp1, r_temp_addr, 0, 4
-		SET r_temp1, r_temp1, 3 // enable counter bit
-		SBBO r_temp1, r_temp_addr, 0, 4 // write it back
-
-		// Read the current counter value
-		// Should be zero.
-		// LBBO r_sleep_counter, r_temp_addr, 0xC, 4
 .endm
 
 // Send an interrupt to the ARM

@@ -247,7 +247,7 @@ export class BbbPinIndex {
 
 			if (pin) {
 
-				if (parseInt(mappedName) == mappedName) {
+				if (parseInt(mappedName) as any == mappedName) {
 					pin.mappedChannelIndex = parseInt(mappedName);
 				} else {
 					pin.specialName = mappedName;
