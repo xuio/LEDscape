@@ -241,11 +241,11 @@ export abstract class BasePruProgram {
 
 	protected WAITNS(waitNs: number, waitLabel: string) {
 
+		this.MOV(this.r_temp_addr, "PRU_CONTROL_ADDRESS");
 		this.emitLabel(waitLabel);
 
-		this.MOV(this.r_temp_addr, "PRU_CONTROL_ADDRESS");
-		this.LBBO(this.r_temp_addr, this.r_temp_addr, 0xC, 4);
-		this.QBGT(waitLabel, this.r_temp_addr, waitNs/5)
+		this.LBBO(this.r_temp1, this.r_temp_addr, 0xC, 4);
+		this.QBGT(waitLabel, this.r_temp1, waitNs/5)
 	}
 	protected WAIT_TIMEOUT(timeoutNs: number, timeoutLabel: string) { this.emitInstr("WAIT_TIMEOUT", [timeoutNs, timeoutLabel]); }
 	protected SLEEPNS(sleepNs: number, sleepLabel: string) {

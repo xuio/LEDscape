@@ -364,10 +364,10 @@ var BasePruProgram = (function () {
         this.WAITNS(this.currentWaitNs += waitNs, waitLabel);
     };
     BasePruProgram.prototype.WAITNS = function (waitNs, waitLabel) {
-        this.emitLabel(waitLabel);
         this.MOV(this.r_temp_addr, "PRU_CONTROL_ADDRESS");
-        this.LBBO(this.r_temp_addr, this.r_temp_addr, 0xC, 4);
-        this.QBGT(waitLabel, this.r_temp_addr, waitNs / 5);
+        this.emitLabel(waitLabel);
+        this.LBBO(this.r_temp1, this.r_temp_addr, 0xC, 4);
+        this.QBGT(waitLabel, this.r_temp1, waitNs / 5);
     };
     BasePruProgram.prototype.WAIT_TIMEOUT = function (timeoutNs, timeoutLabel) { this.emitInstr("WAIT_TIMEOUT", [timeoutNs, timeoutLabel]); };
     BasePruProgram.prototype.SLEEPNS = function (sleepNs, sleepLabel) {
