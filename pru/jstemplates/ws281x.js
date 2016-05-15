@@ -77,7 +77,7 @@ var WS281xProgram = (function (_super) {
             g.DECREMENT(g.r_data_len);
             g.QBNE(l_word_loop, g.r_data_len, 0);
         });
-        g.WAITNS_REL(ONE_PULSE_NS, "one_bits_wait_end");
+        g.WAITNS(ZERO_PULSE_NS + ONE_PULSE_NS, "one_bits_wait_end");
         g.PINS_LOW(g.pruPins);
         //g.SLEEPNS(INTERFRAME_NS, "interframe_wait");
     };

@@ -360,9 +360,6 @@ var BasePruProgram = (function () {
         this.SBBO(tempReg, this.r_temp_addr, 0, 4); // write it back
     };
     BasePruProgram.prototype.RAISE_ARM_INTERRUPT = function () { this.emitInstr("RAISE_ARM_INTERRUPT", []); };
-    BasePruProgram.prototype.WAITNS_REL = function (waitNs, waitLabel) {
-        this.WAITNS(this.currentWaitNs += waitNs, waitLabel);
-    };
     BasePruProgram.prototype.WAITNS = function (waitNs, waitLabel) {
         this.MOV(this.r_temp_addr, "PRU_CONTROL_ADDRESS");
         this.emitLabel(waitLabel);

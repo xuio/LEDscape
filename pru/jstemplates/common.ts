@@ -234,11 +234,6 @@ export abstract class BasePruProgram {
 	}
 	protected RAISE_ARM_INTERRUPT() { this.emitInstr("RAISE_ARM_INTERRUPT", []); }
 
-
-	protected WAITNS_REL(waitNs: number, waitLabel: string) {
-		this.WAITNS(this.currentWaitNs += waitNs, waitLabel);
-	}
-
 	protected WAITNS(waitNs: number, waitLabel: string) {
 
 		this.MOV(this.r_temp_addr, "PRU_CONTROL_ADDRESS");
