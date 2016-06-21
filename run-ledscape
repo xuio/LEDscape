@@ -10,3 +10,4 @@ modprobe uio_pruss
 #./opc-server --config ws281x-24-config.json
 ./opc-server --config ws281x-48-config.json
 #./opc-server --config apa102-48-config.json
+#./opc-server --config ws281x-rj45-config.json
