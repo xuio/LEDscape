@@ -24,6 +24,10 @@ var Commands = {
 		printPinTable("Mapped Channel Index", pin => pin.mappedChannelIndex != undefined ? pin.mappedChannelIndex : "");
 
 		printPinTable("Unused Channels", pin => (pin.mappedChannelIndex == undefined && pin.gpioNum != undefined) ? pin.gpioName : "");
+
+		console.info("PRU0 Pins: " + pinIndex.pinData.filter(d => d.r30pru == 0).length);
+		console.info("PRU1 Pins: " + pinIndex.pinData.filter(d => d.r30pru == 1).length);
+
 		printPinTable("NAME", pin => pin.name);
 	},
 

@@ -16,6 +16,8 @@ var Commands = {
         pinTable_1.printPinTable("GPIO: Global Number", function (pin) { return pin.gpioNum || ""; });
         pinTable_1.printPinTable("Mapped Channel Index", function (pin) { return pin.mappedChannelIndex != undefined ? pin.mappedChannelIndex : ""; });
         pinTable_1.printPinTable("Unused Channels", function (pin) { return (pin.mappedChannelIndex == undefined && pin.gpioNum != undefined) ? pin.gpioName : ""; });
+        console.info("PRU0 Pins: " + bbbPinData_1.pinIndex.pinData.filter(function (d) { return d.r30pru == 0; }).length);
+        console.info("PRU1 Pins: " + bbbPinData_1.pinIndex.pinData.filter(function (d) { return d.r30pru == 1; }).length);
         pinTable_1.printPinTable("NAME", function (pin) { return pin.name; });
     },
     "pinout": function () {
