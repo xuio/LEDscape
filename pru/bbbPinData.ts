@@ -63,6 +63,8 @@ export interface PinMappingData {
 	id: string;
 	name: string;
 	description: string;
+	dtbName?: string;
+	maxChannelCount?: number;
 	capeSupport: {
 		org: string;
 		id: string;
@@ -225,14 +227,29 @@ export class BbbPinIndex {
 		pinData.forEach(function(pin) {
 			if (pin.mappedChannelIndex < pinsPerPru*2) {
 				pin.pruIndex = pin.mappedChannelIndex < pinsPerPru ? 0 : 1;
-				pin.pruPin = pin.mappedChannelIndex - (
-					pin.pruIndex * pinsPerPru
-					);
+				pin.pruPin = pin.mappedChannelIndex - (pin.pruIndex * pinsPerPru);
 				pin.pruDataChannel = pin.pruPin;
 
 				if (pin.pruPin < pinsPerPru) {
 					pin.dataChannelIndex = pin.pruIndex * pinsPerPru + pin.pruPin;
 				}
+			}
+		});
+
+		this.rebuild();
+	}
+
+	public applyR30PinMapping() {
+		this.resetPinPruMapping();
+
+		const pruPinCount = [0, 0];
+
+		pinData.forEach(function(pin) {
+			if (typeof(pin.r30pru) === "number" && typeof(pin.mappedChannelIndex) === "number") {
+				pin.pruIndex = pin.r30pru;
+				pin.pruPin = pruPinCount[pin.r30pru] ++;
+				pin.pruDataChannel = pin.mappedChannelIndex;
+				pin.dataChannelIndex = pin.mappedChannelIndex;
 			}
 		});
 

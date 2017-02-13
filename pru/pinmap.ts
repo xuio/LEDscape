@@ -102,38 +102,83 @@ var Commands = {
 
 		var usedPins = pru0Result.usedPins.concat(pru1Result.usedPins);
 
-		if (shell.test("-d", '/sys/class/gpio')) {
-			usedPins.forEach(function (pin) {
-				process.stderr.write("Pin " + pin.mappedChannelIndex + " (" + pin.headerName + "):");
+		if (pinMapping.dtbName) {
+			const capemgrDirectory = [
+				"/sys/devices/bone_capemgr",
+				"/sys/devices/platform/bone_capemgr",
+				"/sys/devices/bone_capemgr.0",
+				"/sys/devices/bone_capemgr.1",
+				"/sys/devices/bone_capemgr.2",
+				"/sys/devices/bone_capemgr.3",
+				"/sys/devices/bone_capemgr.4",
+				"/sys/devices/bone_capemgr.5",
+				"/sys/devices/bone_capemgr.6",
+				"/sys/devices/bone_capemgr.7",
+				"/sys/devices/bone_capemgr.8",
+				"/sys/devices/bone_capemgr.9"
+			].filter(name => shell.test("-d", name))[0];
 
-				try {
-					writeSync("/sys/class/gpio/export", pin.gpioNum);
-					process.stderr.write("\n  export OK;");
-				} catch (e) {
-					process.stderr.write("\n  export FAIL: echo " + pin.gpioNum + " > /sys/class/gpio/export");
-					process.stderr.write("\n    " + e);
+			if (capemgrDirectory) {
+				const dtboSourceFilename = "../dts/" + pinMapping.dtbName + "-00A0.dtbo";
+				const dtboDestFilename = "/lib/firmware/" + pinMapping.dtbName + "-00A0.dtbo";
+
+				if (shell.test("-e", dtboSourceFilename)) {
+					if (shell.cp(dtboSourceFilename, dtboDestFilename)) {
+						console.info("Copied " + dtboSourceFilename + " to " + dtboDestFilename);
+
+						if ((pinMapping.dtbName as any).to(capemgrDirectory + "/slots")) {
+							console.info("Enabled device tree overlay " + pinMapping.dtbName);
+						} else {
+							console.error("Failed to load device tree overlay " + pinMapping.dtbName);
+							process.exit(-1);
+						}
+					} else {
+						console.error("Failed to copy " + dtboSourceFilename + " to " + dtboDestFilename);
+						process.exit(-1);
+					}
+				} else {
+					console.error("Device tree file not found: " + dtboSourceFilename);
+					process.exit(-1);
 				}
-
-				try {
-					writeSync("/sys/class/gpio/gpio" + pin.gpioNum + "/direction", "out");
-					process.stderr.write("\n  direction OK;");
-				} catch (e) {
-					process.stderr.write("\n  direction FAIL: echo out > /sys/class/gpio/gpio" + pin.gpioNum + "/direction");
-					process.stderr.write("\n    " + e);
-				}
-
-				try {
-					writeSync("/sys/class/gpio/gpio" + pin.gpioNum + "/value", 0);
-					process.stderr.write("\n  value OK;");
-				} catch (e) {
-					process.stderr.write("\n  value FAIL: echo 0 > /sys/class/gpio/gpio" + pin.gpioNum + "/value");
-					process.stderr.write("\n    " + e);
-				}
-
-				process.stderr.write("\n");
-			});
+			} else {
+				console.error("No bone_capemgr found... Skipping pin setup.");
+			}
 		} else {
-			console.error("No /sys/class/gpio... Skipping pin setup.");
+			if (shell.test("-d", '/sys/class/gpio')) {
+				usedPins.forEach(
+					function (pin) {
+						process.stderr.write("Pin " + pin.mappedChannelIndex + " (" + pin.headerName + "):");
+
+						try {
+							writeSync("/sys/class/gpio/export", pin.gpioNum);
+							process.stderr.write("\n  export OK;");
+						} catch (e) {
+							process.stderr.write("\n  export FAIL: echo " + pin.gpioNum + " > /sys/class/gpio/export");
+							process.stderr.write("\n    " + e);
+						}
+
+						try {
+							writeSync("/sys/class/gpio/gpio" + pin.gpioNum + "/direction", "out");
+							process.stderr.write("\n  direction OK;");
+						} catch (e) {
+							process.stderr.write("\n  direction FAIL: echo out > /sys/class/gpio/gpio" + pin.gpioNum + "/direction");
+							process.stderr.write("\n    " + e);
+						}
+
+						try {
+							writeSync("/sys/class/gpio/gpio" + pin.gpioNum + "/value", 0);
+							process.stderr.write("\n  value OK;");
+						} catch (e) {
+							process.stderr.write("\n  value FAIL: echo 0 > /sys/class/gpio/gpio" + pin.gpioNum + "/value");
+							process.stderr.write("\n    " + e);
+						}
+
+						process.stderr.write("\n");
+					}
+				);
+			} else {
+				console.error("No /sys/class/gpio... Skipping pin setup.");
+			}
 		}
 
 		console.info("PRU0:", pru0Result.binFile);
