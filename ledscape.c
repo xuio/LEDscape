@@ -44,7 +44,7 @@ static const uint8_t gpios3[] = {
 
 #define ARRAY_COUNT(a) ((sizeof(a) / sizeof(*a)))
 
-#define PRU_TMP_DIR "/tmp/pru"
+#define PRU_TMP_DIR "./pru-cache"
 
 
 /** Command structure shared with the PRU.
@@ -131,17 +131,39 @@ const char* build_pruN_program_name(
 	const char* output_mode_name,
 	const char* output_mapping_name,
 	uint8_t pruNum,
+	unsigned ledCount,
 	char* out_pru_filename,
 	int filename_len
 ) {
 	snprintf(
 		out_pru_filename,
 		filename_len,
-		"%s/%s-%s-pru%d.bin",
+		"%s/%s-%s-pru%d-%dch.bin",
 		PRU_TMP_DIR,
 		output_mode_name,
 		output_mapping_name,
-		(int) pruNum
+		(int) pruNum,
+		(int) ledCount
+	);
+
+	return out_pru_filename;
+}
+
+const char* build_setup_script_name(
+	const char* output_mode_name,
+	const char* output_mapping_name,
+	unsigned ledCount,
+	char* out_pru_filename,
+	int filename_len
+) {
+	snprintf(
+		out_pru_filename,
+		filename_len,
+		"%s/%s-%s-%dch-setup.sh",
+		PRU_TMP_DIR,
+		output_mode_name,
+		output_mapping_name,
+		(int) ledCount
 	);
 
 	return out_pru_filename;
@@ -163,15 +185,51 @@ ledscape_t *ledscape_init_with_mode_mapping(
 	const char *mode_name
 )
 {
+	char pru0_program_filename[512];
+	char pru1_program_filename[512];
+	char setup_script_filename[512];
+
+	build_pruN_program_name(mode_name, mapping_name, 0, num_channels, pru0_program_filename, sizeof(pru0_program_filename));
+	build_pruN_program_name(mode_name, mapping_name, 1, num_channels, pru1_program_filename, sizeof(pru1_program_filename));
+	build_setup_script_name(mode_name, mapping_name, num_channels, setup_script_filename, sizeof(setup_script_filename));
+
+	if (access(setup_script_filename, F_OK) == -1) {
+		printf("BAD: access(): %d: %s\n", errno, strerror(errno));
+		// Use node to setup the pins
+		char* cmd;
+		asprintf(&cmd, "node pru/pinmap.js pru-setup --mapping %s --mode %s --tempDir %s --channel-count %d", mapping_name, mode_name, PRU_TMP_DIR, num_channels);
+		printf("Starting pinmap.js setup: %s\n", cmd);
+		int ret = system(cmd);
+		if (ret != 0) {
+			printf("Failed to execute %s with error code %d\n", cmd, ret);
+			exit(-1);
+		}
+		free(cmd);
+	} else {
+		printf("Skipping pinmap.js setup because setup file %s already exists.\n", setup_script_filename);
+	}
+
+	char* setup_cmd;
+	asprintf(&setup_cmd, "sh %s", setup_script_filename);
+
+	printf("Running setup script: %s\n", setup_cmd);
+	int ret = system(setup_cmd);
+	if (ret != 0) {
+		printf("Failed to execute %s with error code %d\n", setup_cmd, ret);
+		exit(-1);
+	}
+	free(setup_cmd);
+
+	/////////////////////////////
 	pru_t * const pru0 = pru_init(0);
 	pru_t * const pru1 = pru_init(1);
 
-	const size_t frame_size = num_pixels * LEDSCAPE_NUM_STRIPS * 4;
+	const size_t frame_size = num_pixels * LEDSCAPE_MAX_STRIPS * 4;
 
 	if (2*frame_size > pru0->ddr_size)
 		die("Pixel data needs at least 2 * %zu, only %zu in DDR\n",
-			frame_size,
-			pru0->ddr_size
+		    frame_size,
+		    pru0->ddr_size
 		);
 
 	ledscape_t * const leds = calloc(1, sizeof(*leds));
@@ -194,22 +252,6 @@ ledscape_t *ledscape_init_with_mode_mapping(
 		.response   = 0,
 		.num_pixels = leds->num_pixels,
 	};
-
-	char pru0_program_filename[512];
-	char pru1_program_filename[512];
-
-	build_pruN_program_name(mode_name, mapping_name, 0, pru0_program_filename, sizeof(pru0_program_filename));
-	build_pruN_program_name(mode_name, mapping_name, 1, pru1_program_filename, sizeof(pru1_program_filename));
-
-	// Use node to setup the pins
-	printf("Setting up pins...\n");
-	char* cmd;
-	asprintf(&cmd, "node pru/pinmap.js pru-setup --mapping %s --mode %s --tempDir %s --channel-count %d", mapping_name, mode_name, PRU_TMP_DIR, num_channels);
-	int ret = system(cmd);
-	if (ret != 0) {
-		printf("Failed to executed %s with error code %d\n", cmd, ret);
-	}
-	free(cmd);
 
 	// Initiate the PRU0 program
 	pru_exec(pru0, pru0_program_filename);

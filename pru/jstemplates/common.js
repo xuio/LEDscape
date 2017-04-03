@@ -436,7 +436,7 @@ var BasePruProgram = (function () {
         if (r30Reg === void 0) { r30Reg = this.r_temp2; }
         var label_name = "channel_" + pin.pruDataChannel + "_zero_skip";
         this.emitComment("Test if pin (pruDataChannel=" + pin.pruDataChannel + ", global=" + pin.dataChannelIndex + ") is ZERO and SET bit " + pin.r30bit + " in " + r30Reg + " for use with r30");
-        this.QBBS(label_name, this.r_datas[pin.pruDataChannel], this.r_bit_num);
+        this.QBBS(label_name, this.r_datas[pin.dataChannelIndex], this.r_bit_num);
         this.CLR(r30Reg, r30Reg, pin.r30bit);
         this.emitLabel(label_name, true);
     };

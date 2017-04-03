@@ -11,12 +11,10 @@
 #include <stdint.h>
 #include "pru.h"
 
-/** The number of strips supported.
- *
- * Changing this also requires changes in ws281x.p to stride the
- * correct number of bytes per row..
+/**
+ * The maximum number of strips supported by LEDscape.
  */
-#define LEDSCAPE_NUM_STRIPS 48
+#define LEDSCAPE_MAX_STRIPS 48
 
 
 /**
@@ -39,7 +37,7 @@ typedef struct {
  * in a burst mode.
  */
 typedef struct {
-	ledscape_pixel_t strip[LEDSCAPE_NUM_STRIPS];
+	ledscape_pixel_t strip[LEDSCAPE_MAX_STRIPS];
 } __attribute__((__packed__)) ledscape_frame_t;
 
 typedef struct ws281x_command ws281x_command_t;
@@ -132,8 +130,16 @@ extern const char* build_pruN_program_name(
 	const char* output_mode_name,
 	const char* output_mapping_name,
 	uint8_t pruNum,
+	unsigned ledCount,
 	char* out_pru_filename,
 	int filename_len
 );
 
+extern const char* build_setup_script_name(
+	const char* output_mode_name,
+	const char* output_mapping_name,
+	unsigned ledCount,
+	char* out_pru_filename,
+	int filename_len
+);
 #endif

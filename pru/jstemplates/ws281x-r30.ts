@@ -22,19 +22,23 @@ export default class WS281xR30Program extends BaseSetupPruProgram {
 	}
 
 	protected frameCode() {
-		var g = this;
+		const g = this;
 
 		// Bit timings from http://wp.josh.com/2014/05/13/ws2812-neopixels-are-not-so-finicky-once-you-get-to-know-them/
-		var ZERO_PULSE_NS  = 200; // 200 - 350 - 500
-		var ONE_PULSE_NS   = 520; // 550 - 700 - 5,500
-		var INTERBIT_NS    = 375;   // 450 - 600 - 6,000
-		var INTERFRAME_NS  = 6000;
+		// ZERO_HIGH: 200 - 350 - 500
+		// ONE_HIGH:  550 - 700 - 5,500
+		// ONE_LOW:   450 - 600 - 6,000
+		// The following values are not the actual times. They are hand-tuned values determined using a scope.
+		const ZERO_PULSE_NS  = 200; // Actual:
+		const ONE_PULSE_NS   = 520; // Actual: 630
+		const INTERBIT_NS    = 375; // Actual:
+		const INTERFRAME_NS  = 15000;
 
 		g.pruBlock(() => {
 			var l_word_loop = g.emitLabel("l_word_loop");
 
 			// Load all the data.
-			g.LOAD_CHANNEL_DATA(g.pruPins[0], 0, this.overallChannelCount);
+			g.LOAD_CHANNEL_DATA(pinIndex.pinsByMappedChannelIndex[0], 0, this.overallChannelCount);
 
 			// Store the data register in the unused bits of the data registers so it can be used for one of the
 			// GPIO banks
@@ -65,7 +69,7 @@ export default class WS281xR30Program extends BaseSetupPruProgram {
 
 				g.PINS_LOW_R30(g.pruPins);
 
-				g.WAITNS(ONE_PULSE_NS+INTERBIT_NS, "interbit_wait");
+				g.SLEEPNS(INTERBIT_NS, "interbit_wait");
 
 				g.RESET_COUNTER();
 
@@ -73,6 +77,7 @@ export default class WS281xR30Program extends BaseSetupPruProgram {
 
 				g.WAITNS(ZERO_PULSE_NS, "zero_bits_wait");
 
+				// Zeros low
 				g.AND(g.r30, g.r30, r30tempReg);
 
 				g.QBNE(l_bit_loop, g.r_bit_num, 0);
@@ -92,9 +97,9 @@ export default class WS281xR30Program extends BaseSetupPruProgram {
 			g.QBNE(l_word_loop, g.r_data_len, 0);
 		});
 
-		g.WAITNS(ZERO_PULSE_NS+ONE_PULSE_NS, "one_bits_wait_end");
+		g.WAITNS(ONE_PULSE_NS, "one_bits_wait_end");
 		g.PINS_LOW_R30(g.pruPins);
 
-		//g.SLEEPNS(INTERFRAME_NS, "interframe_wait");
+		g.SLEEPNS(INTERFRAME_NS, "interframe_wait");
 	}
 }
