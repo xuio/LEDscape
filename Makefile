@@ -27,7 +27,7 @@ export CROSS_COMPILE?=arm-linux-gnueabi-
 endif
 
 CFLAGS += \
-	-std=c99 \
+	-std=gnu99 \
 	-W \
 	-Wall \
 	-D_DEFAULT_SOURCE \
